@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+    branches: '*'
+  pull_request:
+    branches: '*'
+
+jobs:
+  tests:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "latest"
+
+    - name: Test with Python ${{ matrix.python-version }}
+      run: |
+        uv run  --python ${{ matrix.python-version }} pytest tests
+
+    - name: Ruff
+      run: |
+        uvx ruff check
+        uvx ruff format --check
+
+    - name: Test build
+      run: uv build
