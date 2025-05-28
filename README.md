@@ -42,7 +42,7 @@ Steps remain similar except you will need to clone this mcp-jupyter repository a
 ```bash
 mkdir ~/Development
 cd ~/Development
-git clone org-49461806@github.com:squareup/mcp-jupyter.git
+git clone https://github.com/block/mcp-jupyter.git
 cd mcp-server
 
 uv venv

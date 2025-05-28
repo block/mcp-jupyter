@@ -1,0 +1,98 @@
+/**
+ * Any CSS included here will be global. The classic template
+ * bundles Infima by default. Infima is a CSS framework designed to
+ * work well for content-centric websites.
+ */
+
+/* You can override the default Infima variables here. */
+:root {
+  --ifm-color-primary: #0066ff;
+  --ifm-color-primary-dark: #0052cc;
+  --ifm-color-primary-darker: #004bb5;
+  --ifm-color-primary-darkest: #003d99;
+  --ifm-color-primary-light: #1a75ff;
+  --ifm-color-primary-lighter: #3385ff;
+  --ifm-color-primary-lightest: #66a3ff;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ifm-hero-background-color: #f5f7fa;
+}
+
+/* For readability concerns, you should choose a lighter palette in dark mode. */
+[data-theme='dark'] {
+  --ifm-color-primary: #4d94ff;
+  --ifm-color-primary-dark: #2e7eff;
+  --ifm-color-primary-darker: #1f73ff;
+  --ifm-color-primary-darkest: #005ce6;
+  --ifm-color-primary-light: #6ca6ff;
+  --ifm-color-primary-lighter: #7ab0ff;
+  --ifm-color-primary-lightest: #99c2ff;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-hero-background-color: #1a1a1a;
+}
+
+/* Hero customization */
+.hero--primary {
+  background-color: var(--ifm-hero-background-color);
+  color: var(--ifm-font-color-base);
+}
+
+.hero__title {
+  font-size: 3.5rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.hero__subtitle {
+  font-size: 1.5rem;
+  font-weight: 400;
+  opacity: 0.8;
+  max-width: 600px;
+  margin: 0 auto 2rem;
+}
+
+/* Button styling similar to Goose */
+.button {
+  border-radius: 8px;
+  font-weight: 600;
+  padding: 12px 24px;
+  transition: all 0.2s ease;
+}
+
+.button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Feature section styling */
+.features {
+  padding: 4rem 0;
+  background-color: var(--ifm-background-surface-color);
+}
+
+.features h3 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+/* Navbar styling */
+.navbar__title {
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+/* Code blocks */
+pre {
+  border-radius: 8px;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+  .hero__title {
+    font-size: 2.5rem;
+  }
+  
+  .hero__subtitle {
+    font-size: 1.25rem;
+  }
+}
