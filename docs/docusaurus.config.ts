@@ -50,6 +50,19 @@ const config: Config = {
     ],
   ],
 
+  themes: [
+    // Local search theme
+    [
+      require.resolve("@easyops-cn/docusaurus-search-local"),
+      {
+        hashed: true,
+        language: ["en"],
+        highlightSearchTermsOnTargetPage: true,
+        explicitSearchResultPath: true,
+      },
+    ],
+  ],
+
   themeConfig: {
     // Replace with your project's social card
     image: 'img/docusaurus-social-card.jpg',
@@ -71,6 +84,10 @@ const config: Config = {
           to: '/docs/quickstart',
           label: 'Quickstart',
           position: 'left',
+        },
+        {
+          type: 'search',
+          position: 'right',
         },
         {
           href: 'https://github.com/block/mcp-jupyter',
