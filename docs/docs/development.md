@@ -263,6 +263,5 @@ def my_new_tool(param1: str, param2: int = 10) -> dict:
 
 ## Next Steps
 
-- [API Reference →](/docs/api)
-- [Contributing Guidelines →](https://github.com/squareup/mcp-jupyter/blob/main/CONTRIBUTING.md)
-- [Issue Tracker →](https://github.com/squareup/mcp-jupyter/issues)
+- [Usage Guide →](/docs/usage)
+- [Installation →](/docs/installation)

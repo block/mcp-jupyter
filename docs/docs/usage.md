@@ -175,5 +175,3 @@ When errors occur:
 ## Next Steps
 
 - [Development Guide →](/docs/development)
-- [API Reference →](/docs/api)
-- [Troubleshooting →](/docs/troubleshooting)

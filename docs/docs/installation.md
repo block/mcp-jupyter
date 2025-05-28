@@ -181,4 +181,3 @@ uvx mcp-jupyter
 
 - [Usage Guide →](/docs/usage)
 - [Development Setup →](/docs/development)
-- [API Reference →](/docs/api)
