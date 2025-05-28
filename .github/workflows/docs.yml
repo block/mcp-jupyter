@@ -31,15 +31,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Activate Hermit
-        uses: cashapp/activate-hermit@v1
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          cache: "true"
+          node-version: '18'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
 
       - name: Install dependencies
         run: |
           cd docs
-          pnpm install --frozen-lockfile
+          pnpm install --no-frozen-lockfile
 
       - name: Build website
         run: |
