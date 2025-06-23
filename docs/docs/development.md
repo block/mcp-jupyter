@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 # Development
@@ -20,28 +20,21 @@ cd mcp-jupyter
 ### 2. Create Development Environment
 
 ```bash
-# Create virtual environment
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install in editable mode
-uv pip install -e .
-
-# Install development dependencies
-uv pip install pytest pytest-asyncio ruff mypy
+# Sync all dependencies including dev tools
+uv sync
 ```
 
 ### 3. Run Tests
 
 ```bash
 # Run all tests
-pytest
+uv run pytest tests/
 
 # Run with coverage
-pytest --cov=mcp_jupyter
+uv run pytest --cov=mcp_jupyter tests/
 
 # Run specific test file
-pytest tests/test_notebook.py
+uv run pytest tests/test_integration.py
 ```
 
 ## Using Development Version
@@ -51,7 +44,7 @@ pytest tests/test_notebook.py
 For development, use the local installation:
 
 ```bash
-goose session --with-extension "uv run $(pwd)/.venv/bin/mcp-jupyter"
+goose session --with-extension "uv run --directory $(pwd) mcp-jupyter"
 ```
 
 This allows you to make changes and test them immediately by restarting Goose.
@@ -64,10 +57,10 @@ Update your MCP configuration to point to your local installation:
 {
   "mcpServers": {
     "jupyter": {
-      "command": "/path/to/mcp-jupyter/.venv/bin/python",
-      "args": ["-m", "mcp_jupyter"],
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/mcp-jupyter", "mcp-jupyter"],
       "env": {
-        "PYTHONPATH": "/path/to/mcp-jupyter"
+        "TOKEN": "your-token-here"
       }
     }
   }
@@ -88,12 +81,12 @@ mcp-jupyter/
 │       ├── state.py          # State management
 │       └── utils.py          # Utilities
 ├── tests/
-│   ├── test_notebook.py
-│   ├── test_integration.py
-│   └── test_notebook_paths.py
+│   ├── test_integration.py   # Integration tests with real Jupyter server
+│   └── test_notebook_paths.py # Unit tests for notebook path handling
 ├── demos/
 │   ├── demo.ipynb
 │   └── goose-demo.png
+├── docs/                     # Documentation site
 ├── pyproject.toml
 └── README.md
 ```
@@ -106,21 +99,13 @@ We use `ruff` for linting and formatting:
 
 ```bash
 # Format code
-ruff format .
+uv run ruff format .
 
 # Check linting
-ruff check .
+uv run ruff check .
 
 # Fix linting issues
-ruff check --fix .
-```
-
-### Type Checking
-
-Run mypy for type checking:
-
-```bash
-mypy src/mcp_jupyter
+uv run ruff check --fix .
 ```
 
 ### Testing Changes
@@ -143,13 +128,6 @@ def test_notebook_creation():
 ```
 
 ## Debugging
-
-### Enable Debug Logging
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
 
 ### Using VS Code
 
@@ -177,11 +155,6 @@ logging.basicConfig(level=logging.DEBUG)
 2. Set breakpoints in the code
 3. Run with F5
 
-### Common Issues
-
-1. **Import errors**: Ensure you're in the virtual environment
-2. **Connection issues**: Check Jupyter server is running
-3. **State issues**: Clear notebook state and restart kernel
 
 ## Contributing
 
@@ -201,13 +174,13 @@ git checkout -b feature/your-feature-name
 
 ```bash
 # Run tests
-pytest
+uv run pytest tests/
 
 # Check formatting
-ruff format --check .
+uv run ruff format --check .
 
 # Check types
-mypy src/mcp_jupyter
+uv run mypy src/mcp_jupyter
 ```
 
 ### 4. Submit PR
@@ -217,51 +190,8 @@ mypy src/mcp_jupyter
 3. Describe changes clearly
 4. Link any related issues
 
-## Architecture
-
-### Key Components
-
-1. **MCP Server** (`server.py`)
-   - Handles MCP protocol
-   - Manages tool registration
-   - Routes requests
-
-2. **Notebook Manager** (`notebook.py`)
-   - Creates/manages notebooks
-   - Handles kernel lifecycle
-   - Manages sessions
-
-3. **State Tracker** (`state.py`)
-   - Tracks notebook state
-   - Manages state consistency
-   - Provides decorators
-
-4. **Jupyter Client** (`jupyter.py`)
-   - Communicates with Jupyter
-   - Handles authentication
-   - Manages connections
-
-### Adding New Tools
-
-To add a new MCP tool:
-
-```python
-@mcp.tool()
-def my_new_tool(param1: str, param2: int = 10) -> dict:
-    """Tool description for MCP clients.
-    
-    Args:
-        param1: Description of param1
-        param2: Description of param2
-        
-    Returns:
-        dict: Result of the operation
-    """
-    # Implementation
-    return {"result": "success"}
-```
-
 ## Next Steps
 
+- [Architecture →](/docs/architecture)
 - [Usage Guide →](/docs/usage)
 - [Installation →](/docs/installation)

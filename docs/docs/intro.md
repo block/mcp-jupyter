@@ -36,9 +36,12 @@ This architecture ensures that your notebook state is maintained throughout the 
 - **Package Management**: Automatic package installation when needed
 - **Seamless Handoff**: Switch between manual and AI-assisted work anytime
 - **MCP Protocol**: Works with any MCP-compatible client
+- **Optimized Architecture**: 4 consolidated tools following MCP best practices
+- **Workflow-oriented Design**: Tools match AI collaboration patterns vs API endpoints
 
 ## Next Steps
 
 - [Quickstart Guide →](/docs/quickstart)
 - [Installation →](/docs/installation)
+- [Architecture →](/docs/architecture)
 - [Usage Examples →](/docs/usage)

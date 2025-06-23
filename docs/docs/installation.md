@@ -27,17 +27,41 @@ pip install uv
 
 MCP Jupyter requires a running JupyterLab server with specific extensions:
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<Tabs>
+<TabItem value="venv" label="Using uv venv" default>
+
 ```bash
-# Create a virtual environment
+# Create virtual environment
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install required packages
 uv pip install jupyterlab jupyter-collaboration ipykernel
 
-# Optional: Install additional kernels or packages
+# Optional: Install additional packages
 uv pip install numpy pandas matplotlib
 ```
+
+</TabItem>
+<TabItem value="project" label="Using uv project">
+
+```bash
+# Initialize a new project (if you don't have one)
+uv init jupyter-workspace
+cd jupyter-workspace
+
+# Add required packages
+uv add jupyterlab jupyter-collaboration ipykernel
+
+# Optional: Add additional packages
+uv add numpy pandas matplotlib
+```
+
+</TabItem>
+</Tabs>
 
 ## Server Installation
 
@@ -60,12 +84,8 @@ For development or customization:
 git clone https://github.com/block/mcp-jupyter.git
 cd mcp-jupyter
 
-# Create virtual environment
-uv venv
-source .venv/bin/activate
-
-# Install in editable mode
-uv pip install -e .
+# Sync all dependencies including dev tools
+uv sync
 ```
 
 ## Starting the Jupyter Server
@@ -87,20 +107,6 @@ jupyter lab --port 8888 --IdentityProvider.token $TOKEN
 
 # Use config file
 jupyter lab --config=/path/to/jupyter_config.py
-```
-
-### Docker Setup
-
-```dockerfile
-FROM python:3.11
-
-RUN pip install uv
-RUN uv pip install jupyterlab jupyter-collaboration ipykernel
-
-EXPOSE 8888
-
-CMD ["jupyter", "lab", "--port=8888", "--ip=0.0.0.0", \
-     "--IdentityProvider.token=BLOCK", "--allow-root"]
 ```
 
 ## Client Configuration
