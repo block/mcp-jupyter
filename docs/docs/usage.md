@@ -29,103 +29,48 @@ The AI will:
 
 Your AI assistant will connect to the existing notebook and preserve all current state.
 
-## Example Workflows
-
-### Data Analysis Workflow
-
-Here's a typical data analysis session:
-
-```python
-# You: Load the sales data
-# AI: *loads data and shows preview*
-
-# You: "I see there are missing values. Handle them appropriately"
-# AI: *analyzes data types and fills missing values*
-
-# You: Manually explore specific columns
-df['revenue'].describe()
-
-# You: "Create visualizations for the quarterly trends"
-# AI: *generates comprehensive visualizations*
-```
-
-### Machine Learning Workflow
-
-```python
-# You: "Load the iris dataset and prepare it for classification"
-# AI loads data, does train-test split
-
-# You manually inspect the data
-X_train.shape, y_train.value_counts()
-
-# You: "Try different classifiers and compare their performance"
-# AI implements multiple models with cross-validation
-
-# If a package is missing, AI will see the error and install it
-# automatically, then retry the operation
-```
-
-### Package Management
-
-The AI assistant handles package installation seamlessly:
-
-```python
-# You: "Create a word cloud from this text"
-# AI attempts to import wordcloud
-# Sees ImportError
-# Installs the package: !pip install wordcloud
-# Retries and creates the visualization
-```
-
-## Advanced Features
+## Key Features
 
 ### State Preservation
+All variables, data, and models remain available throughout your session. Work with large datasets without reloading, and hand off complex objects between you and the AI.
 
-All variables remain available throughout your session:
+### Automatic Error Recovery
+The AI sees execution errors in real-time and can automatically install missing packages, fix syntax issues, or suggest corrections.
 
-```python
-# Cell 1 (executed by you)
-data = load_large_dataset()
-model = train_complex_model(data)
+### Seamless Collaboration  
+Switch between manual exploration and AI assistance at any point. The AI builds on your work, and you can take over whenever needed.
 
-# Cell 2 (AI continues with your objects)
-# AI can access 'data' and 'model' directly
-# "Evaluate the model and show feature importance"
-```
+### Smart Package Management
+Missing dependencies are automatically detected and installed, so your workflow isn't interrupted by import errors.
 
-### Error Handling
+## Common Use Cases
 
-The AI can see and respond to errors:
+MCP Jupyter excels at collaborative data work. Here are popular use cases:
 
-```python
-# You write code with an error
-result = data.groupby('category').mean()  # Error: 'data' not defined
+### Data Analysis & Exploration
+- **Data cleaning & profiling**: "Handle missing values, outliers, and analyze data quality"
+- **Exploratory analysis**: "Show me key patterns, distributions, and statistical summaries"
+- **Trend analysis**: "Plot time series trends with seasonality and correlations"
 
-# AI sees the error and can:
-# - Suggest loading the data first
-# - Check available variables
-# - Provide the correct code
-```
+### Machine Learning & Modeling
+- **End-to-end ML pipeline**: "Prepare data, engineer features, and compare multiple algorithms"
+- **Model optimization**: "Tune hyperparameters and evaluate performance comprehensively"
+- **Experiment analysis**: "Analyze A/B tests and statistical significance"
 
-### Collaborative Exploration
+### Data Visualization & Reporting
+- **Automated visualization**: "Create appropriate charts and statistical plots for this data"
+- **Custom dashboards**: "Build interactive visualizations and reports"
+- **Anomaly detection**: "Identify and visualize unusual patterns"
 
-Switch seamlessly between manual and AI work:
+### Research & Advanced Analysis
+- **Hypothesis testing**: "Test statistical differences and relationships between variables"
+- **Cohort & behavioral analysis**: "Track user patterns and segment analysis over time"
+- **Concept exploration**: "Demonstrate and compare different analytical methods"
 
-```python
-# You: Start exploring
-df.head()
-df.info()
-
-# You: "Continue exploring this dataset and find interesting patterns"
-# AI: Performs statistical analysis, creates visualizations
-
-# You: Notice something interesting in the AI's output
-subset = df[df['category'] == 'electronics']
-subset['profit_margin'].hist()
-
-# You: "Investigate why electronics have this distribution"
-# AI: Continues analysis focusing on your discovery
-```
+### Workflow Automation
+- **Data pipelines**: "Create repeatable ETL processes and data validation workflows"
+- **Report automation**: "Generate recurring analysis reports with charts and summaries"
+- **Code assistance**: "Debug analysis code and explain complex statistical concepts"
 
 ## Best Practices
 
@@ -135,26 +80,41 @@ Be specific about what you want:
 - ❌ "Analyze the data"
 - ✅ "Perform exploratory data analysis focusing on customer segments and seasonal patterns"
 
-### 2. Iterative Refinement
+### 2. Specify Cell Types Clearly
+
+Help the AI choose the right cell type and operation:
+- **For code**: "Add a code cell that loads the data"  
+- **For markdown**: "Create a markdown cell with the project title and description"
+- **For mixed content**: "Add a markdown cell explaining the analysis, then add code to implement it"
+
+### 3. Handle Operation Errors
+
+Common AI mistakes and corrections:
+- ❌ AI says "edit_markdown" → ✅ Should be `operation="add_markdown"` or `operation="edit_code"`
+- ❌ Putting ASCII art in code cells → ✅ "Put that ASCII art in a markdown cell instead"
+- ❌ IndentationError on non-code content → ✅ "That content belongs in markdown, not code"
+
+### 4. Iterative Refinement
 
 Work iteratively with the AI:
 ```
 1. "Load and preview the customer data"
 2. Review the output
-3. "Focus on customers from the last quarter"
+3. "Focus on customers from the last quarter" 
 4. "Now segment them by purchase frequency"
 ```
 
-### 3. State Management
+### 5. State Management
 
 - Keep important variables in the global namespace
-- Use descriptive variable names
+- Use descriptive variable names  
 - Periodically check available variables with `dir()` or `locals()`
 
-### 4. Error Recovery
+### 6. Error Recovery
 
 When errors occur:
 - Let the AI see and handle the error
+- Clarify cell type if there's confusion: "That should be markdown, not code"
 - Provide context if needed
 - The AI will install packages or fix issues automatically
 

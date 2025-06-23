@@ -254,73 +254,122 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
 
 @mcp.tool()
-@NotebookState.state_dependent
-def add_code_cell(notebook_path: str, cell_content: str, execute: bool = True) -> dict:
-    """Add (and optionally execute) a code cell in a Jupyter notebook on the user-provided server.
+def query_notebook(
+    notebook_path: str,
+    query_type: str,
+    execution_count: Optional[Union[str, int]] = None,
+    position_index: Optional[Union[int, float]] = None,
+    cell_id: Optional[str] = None,
+    server_url: str = None,
+) -> Union[dict, list, str, int]:
+    """Query notebook information and metadata on the user-provided server.
 
-    Default to execute=True unless the user requests otherwise or you have good reason
-    not to execute immediately.
-
-    If you are trying to fix a cell that previously threw an error,
-    you should default to editing the cell vs adding a new one.
-
-    Note that adding a cell without executing it leaves it with no execution_count which can make
-    it slightly trickier to execute in a subsequent request, but goose can now find cells by
-    cell_id and content as well, now that it can view the full notebook source.
-
-    A motivating example for why this is state-dependent: user asks goose to write a function,
-    user then manually modifies that function signature, then user asks goose to call that function
-    in a new cell. If goose's knowledge is outdated, it will likely use the old signature.
+    This consolidates all read-only operations into a single tool following MCP best practices.
 
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
                        relative to the Jupyter server root.
-        cell_content: Code content
-        execute: Whether to execute the cell after adding it
+        query_type: Type of query to perform. Options:
+            - 'view_source': View source code of notebook (single cell or all cells)
+            - 'check_server': Check if Jupyter server is running and accessible
+            - 'list_sessions': List all notebook sessions on the server
+            - 'get_position_index': Get the index of a code cell
+        execution_count: (For view_source/get_position_index) The execution count to look for.
+            Can be integer (3), string ("3"), or parenthesized string ("(3)")
+        position_index: (For view_source) The position index to look for
+        cell_id: (For get_position_index) Cell ID like "205658d6-093c-4722-854c-90b149f254ad"
+        server_url: (For check_server/list_sessions) Server URL (default: http://localhost:8888)
 
     Returns
     -------
-        dict
-            Execution results containing
-            (execution_count: int, outputs: list[dict], status: str)
-            If execute=False, this will be an empty dict.
+        Union[dict, list, str, int]:
+            - view_source: dict (single cell) or list[dict] (all cells) with cell contents/metadata
+            - check_server: str status message
+            - list_sessions: list of notebook sessions
+            - get_position_index: int positional index
 
     Raises
     ------
+        ValueError: If invalid query_type or missing required parameters
         McpError: If there's an error connecting to the Jupyter server
     """
-    logger.info("Adding code cell")
+    if query_type == "view_source":
+        # Convert float to int if needed
+        if position_index is not None:
+            position_index = int(position_index)
+        return _query_view_source(notebook_path, execution_count, position_index)
+    elif query_type == "check_server":
+        return _query_check_server(server_url or "http://localhost:8888")
+    elif query_type == "list_sessions":
+        return _query_list_sessions(server_url or "http://localhost:8888")
+    elif query_type == "get_position_index":
+        return _query_get_position_index(notebook_path, execution_count, cell_id)
+    else:
+        raise ValueError(
+            f"Invalid query_type: {query_type}. Must be one of: view_source, check_server, list_sessions, get_position_index"
+        )
 
-    results = {}
+
+@NotebookState.refreshes_state
+def _query_view_source(
+    notebook_path: str,
+    execution_count: Optional[Union[str, int]] = None,
+    position_index: Optional[int] = None,
+) -> Union[dict, list[dict]]:
+    """View the source code of a Jupyter notebook (either single cell or all cells).
+
+    We need to support passing in either the execution_count or the position_index because
+    depending on the context, goose may know one but not the other. Its knowledge also changes
+    over time, e.g. if it executes or adds cells these numbers can change.
+    Goose can pass in either *one* of the two arguments to view a single cell, or neither to view
+    all cells. It must NOT pass in both.
+    """
+    if execution_count is not None and position_index is not None:
+        raise ValueError("Cannot provide both execution_count and position_index.")
+
+    # Ensure the notebook path has the .ipynb extension
+    notebook_path = _ensure_ipynb_extension(notebook_path)
+
+    if execution_count is None and position_index is None:
+        logger.info("Viewing all cells")
+        view_all = True
+    else:
+        view_all = False
+
     with notebook_client(notebook_path) as notebook:
-        position_index = notebook.add_code_cell(cell_content)
+        if view_all:
+            return notebook._doc.ycells.to_py()
 
-        # When the cell is added successfully but we don't need to execute it
-        if not execute:
-            return results
-
-        # When we need to execute
-        try:
-            logger.info("Cell added successfully, now executing")
-            results = execute_cell(notebook_path, position_index)
-            return results
-        except Exception as e:
-            logger.error(f"Error during execution: {e}")
-            # Return partial results if we have them
-            results = {
-                "error": str(e),
-                "message": "Cell was added but execution failed",
-            }
-            return results
+        if position_index is None:
+            position_index = _query_get_position_index(
+                notebook_path, execution_count=execution_count
+            )
+        return notebook[position_index]
 
 
-@mcp.tool()
-def get_position_index(
+def _query_check_server(server_url: str) -> str:
+    """Check if the user-provided Jupyter server is running and accessible."""
+    try:
+        response = requests.get(
+            f"{server_url}/api/sessions", headers={"Authorization": f"token {TOKEN}"}
+        )
+        response.raise_for_status()
+        return "Jupyter server is running"
+    except Exception:
+        return "Jupyter server is not accessible"
+
+
+def _query_list_sessions(server_url: str) -> list:
+    """List all notebook sessions on the Jupyter server."""
+    return list_notebook_sessions(server_url, TOKEN)
+
+
+def _query_get_position_index(
     notebook_path: str,
     execution_count: Optional[Union[str, int]] = None,
     cell_id: Optional[str] = None,
 ) -> int:
-    """Get the index of a code cell in a Jupyter notebook on the user-provided server.
+    """Get the index of a code cell in a Jupyter notebook.
 
     Dev notes re choice to pass in execution_count:
     - another option is have user describe cell and/or have model infer it based on contents,
@@ -335,28 +384,6 @@ def get_position_index(
     get/set cell values, so using ID here makes this clunkier.
     jupyter_nbmodel_client.agent.BaseNbAgent.get_cell(cell_id)
     could be helpful here, either directly or as a reference implementation.
-
-    Could consider making this tool state_dependent, but I think it's mostly safe because it's
-    typically used in service of other state-dependent operations like add/edit_code_cell.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        execution_count: The index (execution_count) that is visible to the user in the notebook UI.
-            Formatted like "(19)" (a string starting and ending with parentheses, not including
-            quotes). You must provide exactly one of (execution_count, cell_id).
-        cell_id: A random str of characters like "205658d6-093c-4722-854c-90b149f254ad" that
-            uniquely identifies a cell. These are not visible to the user but goose can find them
-            with its view_source tool. You must provide exactly one of (execution_count, cell_id).
-
-    Returns
-    -------
-        int: positional index that NBModelClient uses under the hood
-
-    Raises
-    ------
-        ValueError: If neither or both execution_count and cell_id are provided
-        ValueError: If no matching cell is found or multiple matches are found
     """
     if execution_count is None and cell_id is None:
         raise ValueError(
@@ -398,77 +425,122 @@ def get_position_index(
 
 
 @mcp.tool()
-@NotebookState.refreshes_state
-def view_source(
+@NotebookState.state_dependent
+def modify_notebook_cells(
     notebook_path: str,
-    execution_count: Optional[Union[str, int]] = None,
-    position_index: Optional[int] = None,
-) -> Union[dict, list[dict]]:
-    """View the source code of a Jupyter notebook (either single cell or all cells) from the
-    user-provided server.
+    operation: str,
+    cell_content: str = None,
+    position_index: Union[int, float] = None,
+    execute: bool = True,
+) -> dict:
+    """Modify notebook cells (add, edit, delete) on the user-provided server.
 
-    We need to support passing in either the execution_count or the position_index because
-    depending on the context, goose may know one but not the other. Its knowledge also changes
-    over time, e.g. if it executes or adds cells these numbers can change.
-    Goose can pass in either *one* of the two arguments to view a single cell, or neither to view
-    all cells. It must NOT pass in both.
+    This consolidates all cell modification operations into a single tool following MCP best practices.
+    Default to execute=True unless the user requests otherwise or you have good reason not to
+    execute immediately.
 
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
                        relative to the Jupyter server root.
-        execution_count: The execution count to look for. Can be an integer (3), string ("3"),
-                        or parenthesized string ("(3)")
-        position_index: The position index to look for
+        operation: Type of cell operation. Options:
+            - 'add_code': Add (and optionally execute) a code cell
+            - 'edit_code': Edit a code cell
+            - 'add_markdown': Add a markdown cell
+            - 'edit_markdown': Edit an existing markdown cell
+            - 'delete': Delete a cell
+        cell_content: Content for the cell (required for add_code, edit_code, add_markdown, edit_markdown)
+        position_index: Position index for edit_code, edit_markdown and delete operations
+        execute: Whether to execute code cells after adding/editing (default: True)
 
     Returns
     -------
-        Union[dict, list[dict]]:
-            - If viewing a single cell: dict containing cell contents and metadata
-              (cell_type, execution_count, metadata, outputs, source)
-            - If viewing all cells: list of dicts containing all cells' contents and metadata
+        dict: Operation results containing:
+            - For add_code/edit_code with execute=True: execution_count, outputs, status
+            - For add_code/edit_code with execute=False: empty dict
+            - For add_markdown/edit_markdown: message and error fields
+            - For delete: message and error fields
 
     Raises
     ------
-        ValueError: If both execution_count and position_index are provided
+        ValueError: If invalid operation or missing required parameters
         McpError: If there's an error connecting to the Jupyter server
+        IndexError: If position_index is out of range
     """
-    if execution_count is not None and position_index is not None:
-        raise ValueError("Cannot provide both execution_count and position_index.")
+    # Convert float position_index to int if needed
+    if position_index is not None:
+        position_index = int(position_index)
 
-    # Ensure the notebook path has the .ipynb extension
-    notebook_path = _ensure_ipynb_extension(notebook_path)
-
-    if execution_count is None and position_index is None:
-        logger.info("Viewing all cells")
-        view_all = True
+    if operation == "add_code":
+        return _modify_add_code_cell(notebook_path, cell_content, execute)
+    elif operation == "edit_code":
+        return _modify_edit_code_cell(
+            notebook_path, position_index, cell_content, execute
+        )
+    elif operation == "add_markdown":
+        return _modify_add_markdown_cell(notebook_path, cell_content)
+    elif operation == "edit_markdown":
+        return _modify_edit_markdown_cell(notebook_path, position_index, cell_content)
+    elif operation == "delete":
+        return _modify_delete_cell(notebook_path, position_index)
     else:
-        view_all = False
+        raise ValueError(
+            f"Invalid operation: {operation}. Must be one of: add_code, edit_code, add_markdown, edit_markdown, delete"
+        )
 
+
+def _modify_add_code_cell(
+    notebook_path: str, cell_content: str, execute: bool = True
+) -> dict:
+    """Add (and optionally execute) a code cell in a Jupyter notebook.
+
+    If you are trying to fix a cell that previously threw an error,
+    you should default to editing the cell vs adding a new one.
+
+    Note that adding a cell without executing it leaves it with no execution_count which can make
+    it slightly trickier to execute in a subsequent request, but goose can now find cells by
+    cell_id and content as well, now that it can view the full notebook source.
+
+    A motivating example for why this is state-dependent: user asks goose to write a function,
+    user then manually modifies that function signature, then user asks goose to call that function
+    in a new cell. If goose's knowledge is outdated, it will likely use the old signature.
+    """
+    if not cell_content:
+        raise ValueError("cell_content is required for add_code operation")
+
+    logger.info("Adding code cell")
+
+    results = {}
     with notebook_client(notebook_path) as notebook:
-        if view_all:
-            return notebook._doc.ycells.to_py()
+        position_index = notebook.add_code_cell(cell_content)
 
-        if position_index is None:
-            position_index = get_position_index(
-                notebook_path, execution_count=execution_count
-            )
-        return notebook[position_index]
+        # When the cell is added successfully but we don't need to execute it
+        if not execute:
+            return results
+
+        # When we need to execute
+        try:
+            logger.info("Cell added successfully, now executing")
+            results = _execute_cell_internal(notebook_path, position_index)
+            return results
+        except Exception as e:
+            logger.error(f"Error during execution: {e}")
+            # Return partial results if we have them
+            results = {
+                "error": str(e),
+                "message": "Cell was added but execution failed",
+            }
+            return results
 
 
-@mcp.tool()
-@NotebookState.state_dependent
-def edit_code_cell(
+def _modify_edit_code_cell(
     notebook_path: str, position_index: int, cell_content: str, execute: bool = True
 ) -> dict:
-    """Edit a code cell in a Jupyter notebook on the user-provided server.
-
-    Default to execute=True unless the user requests otherwise or you have good reason not to
-    execute immediately.
+    """Edit a code cell in a Jupyter notebook.
 
     Note that users can edit cell contents too, so if you are making assumptions about the
     position_index of the cell to edit based on chat history with the user, you should first
-    make sure the notebook state matches your expected state using your view_source tool.
-    If it does not match the expected state, you should then use your view_source tool to update
+    make sure the notebook state matches your expected state using your query_notebook tool.
+    If it does not match the expected state, you should then use your query_notebook tool to update
     your knowledge of the current cell contents.
 
     If you execute a cell and it fails and you want to debug it, you should default to editing
@@ -478,28 +550,12 @@ def edit_code_cell(
     user then manually modifies the function, then asks goose to make additional changes to the
     function. If goose's knowledge is outdated, it will likely ignore the user's recent changes
     and modify the old version of the function, losing user work.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        position_index: positional index that NBModelClient uses under the hood.
-        cell_content: New code content to write to the cell.
-        execute: Whether to execute the cell after editing
-
-    Returns
-    -------
-        dict: Execution results containing:
-            - execution_count: int
-            - outputs: list[dict]
-            - status: str
-            If execute=False, returns an empty dict
-
-    Raises
-    ------
-        McpError: If notebook state has changed since last viewed
-        McpError: If there's an error connecting to the Jupyter server
-        IndexError: If position_index is out of range
     """
+    if not cell_content:
+        raise ValueError("cell_content is required for edit_code operation")
+    if position_index is None:
+        raise ValueError("position_index is required for edit_code operation")
+
     logger.info("Editing code cell")
 
     # Ensure the notebook path has the .ipynb extension
@@ -519,92 +575,116 @@ def edit_code_cell(
         # Update cell source code.
         notebook[position_index] = full_cell_contents
         if execute:
-            results = execute_cell(notebook_path, position_index)
+            results = _execute_cell_internal(notebook_path, position_index)
 
     return results
 
 
-@mcp.tool()
-@NotebookState.refreshes_state
-def execute_cell(notebook_path: str, position_index: int) -> dict:
-    """Execute an existing code cell in a Jupyter notebook on the user-provided server.
+def _modify_add_markdown_cell(notebook_path: str, cell_content: str) -> dict:
+    """Add a markdown cell in a Jupyter notebook.
 
-    In most cases you should call add_code_cell or edit_code_cell instead, but occasionally
-    you might want to re-execute a cell after changing a *different* cell.
+    Technically might be a little risky to mark this as refreshes_state because the user could make
+    other changes that are invisible to goose. But trying it out this way because I don't think
+    goose adding a markdown cell should necessarily force it to view the full notebook source on
+    subsequent tool calls.
+    """
+    if not cell_content:
+        raise ValueError("cell_content is required for add_markdown operation")
 
-    Note that users can edit cell contents too, so if you assume you know the position_index
-    of the cell to execute based on past chat history, you should first make sure the notebook state
-    matches your expected state using your view_source tool. If it does not match the
-    expected state, you should then use your view_source tool to update your knowledge of the
-    current cell contents.
+    logger.info("Adding markdown cell")
 
-    Technically could be considered state_dependent, but it is usually called inside edit_code_cell
-    or add_code_cell which area already state_dependent. Every hash update is slow because we have
-    to wait for the notebook to save first so using refreshes_state instead saves 1.5s per call.
-    Only risk is if user asks goose to execute a single cell and goose assumes it knows the
-    position_index already, but usually it would be faster for the user to just execute the cell
-    directly - this tool is mostly useful to allow goose to debug independently.
+    # Ensure the notebook path has the .ipynb extension
+    notebook_path = _ensure_ipynb_extension(notebook_path)
+
+    results = {"message": "", "error": ""}
+    try:
+        with notebook_client(notebook_path) as notebook:
+            notebook.add_markdown_cell(cell_content)
+        results["message"] = "Markdown cell added"
+
+    except Exception as e:
+        logger.error(f"Error adding markdown cell: {e}")
+        results["error"] = str(e)
+
+    return results
+
+
+def _modify_edit_markdown_cell(
+    notebook_path: str, position_index: int, cell_content: str
+) -> dict:
+    """Edit an existing markdown cell in a Jupyter notebook.
+
+    Note that users can edit cell contents too, so if you are making assumptions about the
+    position_index of the cell to edit based on chat history with the user, you should first
+    make sure the notebook state matches your expected state using your query_notebook tool.
+    If it does not match the expected state, you should then use your query_notebook tool to update
+    your knowledge of the current cell contents.
 
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
                        relative to the Jupyter server root.
-        position_index: positional index that NBModelClient uses under the hood
+        position_index: positional index that NBModelClient uses under the hood.
+        cell_content: New markdown content to write to the cell.
 
     Returns
     -------
-        dict: Execution results containing:
-            - execution_count: int
-            - outputs: list[dict] of output content
-            - status: str indicating execution status ("ok" or "error")
+        dict: Contains two keys:
+            - "message": "Markdown cell edited" if successful, empty string if failed
+            - "error": Error message if failed, empty string if successful
 
     Raises
     ------
+        McpError: If notebook state has changed since last viewed
         McpError: If there's an error connecting to the Jupyter server
         IndexError: If position_index is out of range
-        RuntimeError: If kernel execution fails
     """
+    if not cell_content:
+        raise ValueError("cell_content is required for edit_markdown operation")
+    if position_index is None:
+        raise ValueError("position_index is required for edit_markdown operation")
+
+    logger.info("Editing markdown cell")
+
     # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    # Get kernel using the stored server URL
-    kernel = get_kernel(notebook_path)
+    full_cell_contents = {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": cell_content,
+    }
 
-    with notebook_client(notebook_path) as notebook:
-        return notebook.execute_cell(position_index, kernel)
+    results = {"message": "", "error": ""}
+
+    try:
+        with notebook_client(notebook_path) as notebook:
+            # Update cell source code.
+            notebook[position_index] = full_cell_contents
+        results["message"] = "Markdown cell edited"
+    except Exception as e:
+        logger.error(f"Error editing markdown cell: {e}")
+        results["error"] = str(e)
+
+    return results
 
 
-@mcp.tool()
-@NotebookState.state_dependent
-def delete_cell(notebook_path: str, position_index: int) -> dict:
-    """Delete a code cell in a Jupyter notebook on the user-provided server.
+def _modify_delete_cell(notebook_path: str, position_index: int) -> dict:
+    """Delete a code cell in a Jupyter notebook.
 
     Note that users can edit cell contents too, so if you assume you know the position_index
     of the cell to delete based on past chat history, you should first make sure the notebook state
-    matches your expected state using your view_source tool. If it does not match the
-    expected state, you should then use your view_source tool to update your knowledge of the
+    matches your expected state using your query_notebook tool. If it does not match the
+    expected state, you should then use your query_notebook tool to update your knowledge of the
     current cell contents.
 
     A motivating example for why this is state-dependent: user asks goose to add a new cell,
     then user runs a few cells manually (changing execution_counts), then tells goose
     "now delete it". In the context of the conversation, this looks fine and Goose may assume it
     knows the correct position_index already, but its knowledge is outdated.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        position_index: positional index that NBModelClient uses under the hood
-
-    Returns
-    -------
-        dict: Contains two keys:
-            - "message": "Cell deleted" if successful, empty string if failed
-            - "error": Error message if failed, empty string if successful
-
-    Raises
-    ------
-        McpError: If notebook state has changed since last viewed
-        IndexError: If position_index is out of range
     """
+    if position_index is None:
+        raise ValueError("position_index is required for delete operation")
+
     # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
@@ -626,74 +706,94 @@ def delete_cell(notebook_path: str, position_index: int) -> dict:
 
 @mcp.tool()
 @NotebookState.refreshes_state
-def add_markdown_cell(notebook_path: str, cell_content: str) -> dict:
-    """Add a markdown cell in a Jupyter notebook on the user-provided server.
+def execute_notebook_code(
+    notebook_path: str,
+    execution_type: str,
+    position_index: Union[int, float] = None,
+    package_names: str = None,
+) -> Union[dict, str]:
+    """Execute code in a Jupyter notebook on the user-provided server.
 
-    Technically might be a little risky to mark this as refreshes_state because the user could make
-    other changes that are invisible to goose. But trying it out this way because I don't think
-    goose adding a markdown cell should necessarily force it to view the full notebook source on
-    subsequent tool calls.
+    This consolidates all code execution operations into a single tool following MCP best practices.
 
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
                        relative to the Jupyter server root.
-        cell_content: Markdown content
+        execution_type: Type of execution operation. Options:
+            - 'execute_cell': Execute an existing code cell
+            - 'install_packages': Install packages using uv pip in the notebook environment
+        position_index: (For execute_cell) Positional index of cell to execute
+        package_names: (For install_packages) Space-separated list of package names to install
 
     Returns
     -------
-        dict: Contains two keys:
-            - "message": "Markdown cell added" if successful, empty string if failed
-            - "error": Error message if failed, empty string if successful
+        Union[dict, str]:
+            - execute_cell: dict with execution_count, outputs, status
+            - install_packages: str with installation result message
 
     Raises
     ------
+        ValueError: If invalid execution_type or missing required parameters
         McpError: If there's an error connecting to the Jupyter server
+        IndexError: If position_index is out of range
+        RuntimeError: If kernel execution fails
     """
-    logger.info("Adding markdown cell")
+    # Convert float position_index to int if needed
+    if position_index is not None:
+        position_index = int(position_index)
+
+    if execution_type == "execute_cell":
+        return _execute_cell_internal(notebook_path, position_index)
+    elif execution_type == "install_packages":
+        return _execute_install_packages(notebook_path, package_names)
+    else:
+        raise ValueError(
+            f"Invalid execution_type: {execution_type}. Must be one of: execute_cell, install_packages"
+        )
+
+
+def _execute_cell_internal(notebook_path: str, position_index: int) -> dict:
+    """Execute an existing code cell in a Jupyter notebook.
+
+    In most cases you should call modify_notebook_cells instead, but occasionally
+    you might want to re-execute a cell after changing a *different* cell.
+
+    Note that users can edit cell contents too, so if you assume you know the position_index
+    of the cell to execute based on past chat history, you should first make sure the notebook state
+    matches your expected state using your query_notebook tool. If it does not match the
+    expected state, you should then use your query_notebook tool to update your knowledge of the
+    current cell contents.
+
+    Technically could be considered state_dependent, but it is usually called inside edit_code_cell
+    or add_code_cell which area already state_dependent. Every hash update is slow because we have
+    to wait for the notebook to save first so using refreshes_state instead saves 1.5s per call.
+    Only risk is if user asks goose to execute a single cell and goose assumes it knows the
+    position_index already, but usually it would be faster for the user to just execute the cell
+    directly - this tool is mostly useful to allow goose to debug independently.
+    """
+    if position_index is None:
+        raise ValueError("position_index is required for execute_cell operation")
 
     # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    results = {"message": "", "error": ""}
-    try:
-        with notebook_client(notebook_path) as notebook:
-            notebook.add_markdown_cell(cell_content)
-        results["message"] = "Markdown cell added"
+    # Get kernel using the stored server URL
+    kernel = get_kernel(notebook_path)
 
-    except Exception as e:
-        logger.error(f"Error adding markdown cell: {e}")
-        results["error"] = str(e)
-
-    return results
+    with notebook_client(notebook_path) as notebook:
+        return notebook.execute_cell(position_index, kernel)
 
 
-@mcp.tool()
-@NotebookState.refreshes_state
-def install_packages(notebook_path: str, package_names: str) -> str:
-    """Install one or more packages using uv pip in the notebook environment of the
-    user-provided server.
+def _execute_install_packages(notebook_path: str, package_names: str) -> str:
+    """Install one or more packages using uv pip in the notebook environment.
 
     Unlike add_code_cell, this shouldn't rely on other code written in the notebook, so we mark
     it as refreshes_state rather than state_dependent. Assumes 'uv' is available in the
     environment where the Jupyter kernel is running.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        package_names: Space-separated list of package names to install
-
-    Returns
-    -------
-        str: Installation result message including:
-            - Success/failure status
-            - Package names attempted to install
-            - Installation output or error message
-
-    Raises
-    ------
-        McpError: If there's an error connecting to the Jupyter server
-        McpError: If kernel is not available
     """
+    if not package_names:
+        raise ValueError("package_names is required for install_packages operation")
+
     logger.info(f"Installing packages: {package_names}")
 
     # Ensure the notebook path has the .ipynb extension
@@ -728,35 +828,10 @@ def install_packages(notebook_path: str, package_names: str) -> str:
 
 
 @mcp.tool()
-def check_jupyter_server(server_url: str = "http://localhost:8888") -> str:
-    """Check if the user-provided Jupyter server is running and accessible.
-
-    Args:
-        server_url: The server URL to check. Defaults to http://localhost:8888.
-
-    Returns
-    -------
-        str: Status message, either:
-            - "Jupyter server is running" if server is accessible
-            - "Jupyter server is not accessible" if server cannot be reached
-
-    Raises
-    ------
-        None: This function handles all exceptions internally
-    """
-    try:
-        response = requests.get(
-            f"{server_url}/api/sessions", headers={"Authorization": f"token {TOKEN}"}
-        )
-        response.raise_for_status()
-        return "Jupyter server is running"
-    except Exception:
-        return "Jupyter server is not accessible"
-
-
-@mcp.tool()
 @NotebookState.refreshes_state
-def notebook(notebook_path: str, cells: list = None, server_url: str = None) -> dict:
+def setup_notebook(
+    notebook_path: str, cells: list = None, server_url: str = None
+) -> dict:
     """Prepare notebook for use and connect to the kernel on the user-provided server.
     Will create a new Jupyter notebook if needed on the server.
 
@@ -797,28 +872,6 @@ def notebook(notebook_path: str, cells: list = None, server_url: str = None) -> 
     NotebookState.update_hash(notebook_path, server_url, caller="notebook_final")
 
     return info
-
-
-@mcp.tool()
-def list_sessions(server_url: str = None) -> list:
-    """List all notebook sessions on the Jupyter server.
-
-    Args:
-        server_url: Optional Jupyter server URL (default: http://localhost:8888)
-
-    Returns
-    -------
-        list: List of notebook sessions
-
-    Raises
-    ------
-        McpError: If there's an error listing notebook sessions
-    """
-    # Use default server_url if not provided
-    if server_url is None:
-        server_url = "http://localhost:8888"
-
-    return list_notebook_sessions(server_url, TOKEN)
 
 
 if __name__ == "__main__":
