@@ -25,7 +25,6 @@ from .state import NotebookState
 from .utils import (
     TOKEN,
     _ensure_ipynb_extension,
-    _extract_execution_count,
     extract_output,
 )
 
@@ -257,10 +256,10 @@ def notebook_client(notebook_path: str, server_url: str = None):
 def query_notebook(
     notebook_path: str,
     query_type: str,
-    execution_count: Optional[Union[str, int, float]] = None,
-    position_index: Optional[Union[int, float]] = None,
-    cell_id: Optional[str] = None,
-    server_url: Optional[str] = None,
+    execution_count: int = None,
+    position_index: int = None,
+    cell_id: str = None,
+    server_url: str = None,
 ) -> Union[dict, list, str, int]:
     """Query notebook information and metadata on the user-provided server.
 
@@ -275,13 +274,15 @@ def query_notebook(
             - 'list_sessions': List all notebook sessions on the server
             - 'get_position_index': Get the index of a code cell
         execution_count: (For view_source/get_position_index) The execution count to look for.
-            IMPORTANT: execution_count is the number shown in square brackets like [3] in Jupyter.
-            This is only available for executed code cells. Can be integer (3), number (3.0), string ("3"), 
-            or parenthesized string ("(3)"). 
-            COMMON MISTAKE: Don't confuse with position_index (cell position in notebook).
+            IMPORTANT: This is the number shown in square brackets like [3] in Jupyter UI.
+            Only available for executed code cells. Must be an integer (e.g., 3).
+            COMMON MISTAKE: Don't confuse with position_index!
+            - execution_count=3 finds the cell that was executed 3rd (shows [3] in Jupyter)
+            - position_index=3 finds the 4th cell in the notebook (0-indexed position)
         position_index: (For view_source) The position index to look for.
-            This is the cell's position in the notebook starting from 0 (first cell = 0, second = 1, etc).
-            Works for all cell types (code, markdown, raw).
+            This is the cell's physical position in the notebook (0-indexed).
+            Examples: first cell = 0, second cell = 1, third cell = 2, etc.
+            Works for all cell types (code, markdown, raw). Must be an integer.
         cell_id: (For get_position_index) Cell ID like "205658d6-093c-4722-854c-90b149f254ad".
             This is a unique identifier for each cell, visible in notebook metadata.
         server_url: (For check_server/list_sessions) Server URL (default: http://localhost:8888)
@@ -317,9 +318,6 @@ def query_notebook(
         McpError: If there's an error connecting to the Jupyter server
     """
     if query_type == "view_source":
-        # Convert float to int if needed
-        if position_index is not None:
-            position_index = int(position_index)
         return _query_view_source(notebook_path, execution_count, position_index)
     elif query_type == "check_server":
         return _query_check_server(server_url or "http://localhost:8888")
@@ -437,8 +435,8 @@ def _get_available_execution_counts(notebook_path: str) -> dict:
 
 def _query_get_position_index(
     notebook_path: str,
-    execution_count: Optional[Union[str, int, float]] = None,
-    cell_id: Optional[str] = None,
+    execution_count: int = None,
+    cell_id: str = None,
 ) -> int:
     """Get the index of a code cell in a Jupyter notebook.
 
@@ -468,40 +466,19 @@ def _query_get_position_index(
 
     # Add parameter validation and user guidance
     if execution_count is not None:
-        # Validate execution_count format and provide helpful guidance
-        try:
-            execution_count_int = _extract_execution_count(execution_count)
-        except ValueError as e:
-            # Get available execution counts for helpful suggestions
-            try:
-                cells_info = _get_available_execution_counts(notebook_path)
-                suggestions = []
-                if cells_info['execution_counts']:
-                    available_counts = ', '.join(map(str, cells_info['execution_counts']))
-                    suggestions.append(f"Available execution_counts: [{available_counts}]")
-                else:
-                    suggestions.append("No cells have been executed yet")
-                
-                suggestions.append(f"Or use position_index (0-{cells_info['total_cells']-1}) instead")
-                suggestion_text = ". " + ". ".join(suggestions) if suggestions else ""
-                
-                raise ValueError(f"{str(e)}{suggestion_text}")
-            except Exception:
-                # If we can't get cell info, just re-raise the original error
-                raise e
-        
-        # Warn about obviously wrong execution counts
-        if execution_count_int < 1:
+        # Validate execution_count range
+        if execution_count < 1:
             raise ValueError(
-                f"execution_count={execution_count_int} is invalid. Execution counts start from 1. "
+                f"execution_count={execution_count} is invalid. Execution counts start from 1. "
                 "If you meant to use position_index (which starts from 0), use position_index parameter instead."
             )
-        elif execution_count_int > 10000:  # Reasonable upper bound
+        elif execution_count > 10000:  # Reasonable upper bound
             raise ValueError(
-                f"execution_count={execution_count_int} seems unreasonably high. "
+                f"execution_count={execution_count} seems unreasonably high. "
                 "Are you sure this is correct? Most notebooks have execution counts in the 1-100 range. "
                 "If you meant to use position_index, use position_index parameter instead."
             )
+        execution_count_int = execution_count
 
     # Set placeholder values for the search
     # In each case we set one of the two params to a placeholder value that the actual notebook
@@ -551,8 +528,7 @@ def _query_get_position_index(
             else:
                 # Multiple matching cells found (should be rare)
                 error_message = (
-                    f"Found {len(position_indices)} cells matching the criteria at positions {sorted(position_indices)}. "
-                    f"This should not happen - please report this as a bug."
+                    f"Found {len(position_indices)} cells matching the criteria at positions {sorted(position_indices)}."
                 )
             
             raise ValueError(error_message)
@@ -566,7 +542,7 @@ def modify_notebook_cells(
     notebook_path: str,
     operation: str,
     cell_content: str = None,
-    position_index: Optional[Union[int, float]] = None,
+    position_index: int = None,
     execute: bool = True,
 ) -> dict:
     """Modify notebook cells (add, edit, delete) on the user-provided server.
@@ -585,8 +561,10 @@ def modify_notebook_cells(
             - 'edit_markdown': Edit an existing markdown cell at specific position
             - 'delete': Delete a cell at specific position
         cell_content: Content for the cell (required for add_code, edit_code, add_markdown, edit_markdown)
-        position_index: Position index for all operations. Optional for add_code/add_markdown 
-            (if not provided, cells are added at the end). Required for edit_code, edit_markdown, and delete.
+        position_index: Position index (0-indexed cell location) for operations. Must be an integer.
+            - Optional for add_code/add_markdown: if provided, inserts at that position; if not, adds at end
+            - Required for edit_code/edit_markdown/delete: specifies which cell to modify
+            Examples: position_index=0 (first cell), position_index=2 (third cell)
         execute: Whether to execute code cells after adding/editing (default: True)
 
     Returns
@@ -603,10 +581,6 @@ def modify_notebook_cells(
         McpError: If there's an error connecting to the Jupyter server
         IndexError: If position_index is out of range
     """
-    # Convert float position_index to int if needed
-    if position_index is not None:
-        position_index = int(position_index)
-
     if operation == "add_code":
         return _modify_add_code_cell(notebook_path, cell_content, execute, position_index)
     elif operation == "edit_code":
@@ -858,7 +832,7 @@ def _modify_delete_cell(notebook_path: str, position_index: int) -> dict:
 def execute_notebook_code(
     notebook_path: str,
     execution_type: str,
-    position_index: Optional[Union[int, float]] = None,
+    position_index: int = None,
     package_names: str = None,
 ) -> Union[dict, str]:
     """Execute code in a Jupyter notebook on the user-provided server.
@@ -887,10 +861,6 @@ def execute_notebook_code(
         IndexError: If position_index is out of range
         RuntimeError: If kernel execution fails
     """
-    # Convert float position_index to int if needed
-    if position_index is not None:
-        position_index = int(position_index)
-
     if execution_type == "execute_cell":
         return _execute_cell_internal(notebook_path, position_index)
     elif execution_type == "install_packages":

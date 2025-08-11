@@ -141,7 +141,7 @@ def test_view_source(jupyter_server, test_notebook):
     # Now view just that specific cell by execution count (if it has one)
     if execution_count is not None:
         specific_cell = query_notebook(
-            test_notebook, "view_source", execution_count=str(execution_count)
+            test_notebook, "view_source", execution_count=int(execution_count)
         )
         assert isinstance(specific_cell, dict)
         assert "def add(a, b):" in specific_cell["source"]
@@ -201,7 +201,7 @@ def test_get_position_index(jupyter_server, test_notebook):
     # If we have an execution count, test that path too
     if execution_count is not None:
         position_by_exec = query_notebook(
-            test_notebook, "get_position_index", execution_count=str(execution_count)
+            test_notebook, "get_position_index", execution_count=int(execution_count)
         )
         assert position_by_exec == position_to_find
 
