@@ -361,7 +361,7 @@ def prepare_notebook(
     except Exception as e:
         if not isinstance(e, McpError):
             logger.error(f"Error preparing notebook: {e}")
-            e = McpError(
+            raise McpError(
                 ErrorData(
                     code=INTERNAL_ERROR, message=f"Could not prepare notebook: {e}"
                 )

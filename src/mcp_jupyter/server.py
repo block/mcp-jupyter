@@ -299,16 +299,16 @@ def query_notebook(
     --------
         # View all cells in notebook
         query_notebook("my_notebook.ipynb", "view_source")
-        
+
         # View cell by execution count (the [3] shown in Jupyter UI)
         query_notebook("my_notebook.ipynb", "view_source", execution_count=3)
-        
+
         # View cell by position (first cell=0, second=1, etc)
         query_notebook("my_notebook.ipynb", "view_source", position_index=0)
-        
+
         # Get position index of cell with execution count [5]
         query_notebook("my_notebook.ipynb", "get_position_index", execution_count=5)
-        
+
         # Get position index by cell ID
         query_notebook("my_notebook.ipynb", "get_position_index", cell_id="205658d6-093c-4722-854c-90b149f254ad")
 
@@ -387,11 +387,11 @@ def _query_list_sessions(server_url: str) -> list:
 
 def _get_available_execution_counts(notebook_path: str) -> dict:
     """Get comprehensive cell information for better error messages.
-    
+
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
                        relative to the Jupyter server root.
-    
+
     Returns
     -------
         dict: Contains:
@@ -403,33 +403,33 @@ def _get_available_execution_counts(notebook_path: str) -> dict:
             - unexecuted_cells: number of code cells without execution count
     """
     notebook_path = _ensure_ipynb_extension(notebook_path)
-    
+
     with notebook_client(notebook_path) as notebook:
         cells_info = {
-            'execution_counts': [],
-            'position_indices': [],
-            'cell_types': [],
-            'total_cells': 0,
-            'code_cells': 0,
-            'unexecuted_cells': 0
+            "execution_counts": [],
+            "position_indices": [],
+            "cell_types": [],
+            "total_cells": 0,
+            "code_cells": 0,
+            "unexecuted_cells": 0,
         }
-        
+
         for i, cell in enumerate(notebook._doc.ycells):
-            cells_info['position_indices'].append(i)
-            cell_type = cell.get('cell_type', 'unknown')
-            cells_info['cell_types'].append(cell_type)
-            cells_info['total_cells'] += 1
-            
-            if cell_type == 'code':
-                cells_info['code_cells'] += 1
-                execution_count = cell.get('execution_count')
+            cells_info["position_indices"].append(i)
+            cell_type = cell.get("cell_type", "unknown")
+            cells_info["cell_types"].append(cell_type)
+            cells_info["total_cells"] += 1
+
+            if cell_type == "code":
+                cells_info["code_cells"] += 1
+                execution_count = cell.get("execution_count")
                 if execution_count is not None:
-                    cells_info['execution_counts'].append(execution_count)
+                    cells_info["execution_counts"].append(execution_count)
                 else:
-                    cells_info['unexecuted_cells'] += 1
-        
+                    cells_info["unexecuted_cells"] += 1
+
         # Sort execution counts for better presentation
-        cells_info['execution_counts'].sort()
+        cells_info["execution_counts"].sort()
         return cells_info
 
 
@@ -500,37 +500,51 @@ def _query_get_position_index(
         if len(position_indices) != 1:
             # Get comprehensive cell information for better error message
             cells_info = _get_available_execution_counts(notebook_path)
-            
+
             if len(position_indices) == 0:
                 # No matching cells found
                 error_parts = []
                 if execution_count is not None:
-                    error_parts.append(f"No cell found with execution_count={execution_count}")
-                    if cells_info['execution_counts']:
-                        available_counts = ', '.join(map(str, cells_info['execution_counts']))
-                        error_parts.append(f"Available execution_counts: [{available_counts}]")
+                    error_parts.append(
+                        f"No cell found with execution_count={execution_count}"
+                    )
+                    if cells_info["execution_counts"]:
+                        available_counts = ", ".join(
+                            map(str, cells_info["execution_counts"])
+                        )
+                        error_parts.append(
+                            f"Available execution_counts: [{available_counts}]"
+                        )
                     else:
-                        error_parts.append("No cells have been executed yet (all execution_counts are None)")
-                    
+                        error_parts.append(
+                            "No cells have been executed yet (all execution_counts are None)"
+                        )
+
                     # Suggest alternatives
-                    error_parts.append(f"Notebook has {cells_info['total_cells']} total cells (positions 0-{cells_info['total_cells']-1})")
-                    if cells_info['code_cells'] > 0:
-                        error_parts.append(f"Including {cells_info['code_cells']} code cells")
-                    if cells_info['unexecuted_cells'] > 0:
-                        error_parts.append(f"with {cells_info['unexecuted_cells']} unexecuted")
-                    
-                    error_parts.append("Try using position_index instead, or execute the cell first to get an execution_count")
-                
+                    error_parts.append(
+                        f"Notebook has {cells_info['total_cells']} total cells (positions 0-{cells_info['total_cells'] - 1})"
+                    )
+                    if cells_info["code_cells"] > 0:
+                        error_parts.append(
+                            f"Including {cells_info['code_cells']} code cells"
+                        )
+                    if cells_info["unexecuted_cells"] > 0:
+                        error_parts.append(
+                            f"with {cells_info['unexecuted_cells']} unexecuted"
+                        )
+
+                    error_parts.append(
+                        "Try using position_index instead, or execute the cell first to get an execution_count"
+                    )
+
                 if cell_id is not None and cell_id != "[placeholder-id]":
                     error_parts.append(f"No cell found with cell_id={cell_id}")
-                
+
                 error_message = ". ".join(error_parts)
             else:
                 # Multiple matching cells found (should be rare)
-                error_message = (
-                    f"Found {len(position_indices)} cells matching the criteria at positions {sorted(position_indices)}."
-                )
-            
+                error_message = f"Found {len(position_indices)} cells matching the criteria at positions {sorted(position_indices)}."
+
             raise ValueError(error_message)
 
         return position_indices.pop()
@@ -582,7 +596,9 @@ def modify_notebook_cells(
         IndexError: If position_index is out of range
     """
     if operation == "add_code":
-        return _modify_add_code_cell(notebook_path, cell_content, execute, position_index)
+        return _modify_add_code_cell(
+            notebook_path, cell_content, execute, position_index
+        )
     elif operation == "edit_code":
         return _modify_edit_code_cell(
             notebook_path, position_index, cell_content, execute
@@ -600,7 +616,10 @@ def modify_notebook_cells(
 
 
 def _modify_add_code_cell(
-    notebook_path: str, cell_content: str, execute: bool = True, position_index: Optional[int] = None
+    notebook_path: str,
+    cell_content: str,
+    execute: bool = True,
+    position_index: Optional[int] = None,
 ) -> dict:
     """Add (and optionally execute) a code cell in a Jupyter notebook.
 
@@ -697,7 +716,9 @@ def _modify_edit_code_cell(
     return results
 
 
-def _modify_add_markdown_cell(notebook_path: str, cell_content: str, position_index: Optional[int] = None) -> dict:
+def _modify_add_markdown_cell(
+    notebook_path: str, cell_content: str, position_index: Optional[int] = None
+) -> dict:
     """Add a markdown cell in a Jupyter notebook.
 
     Technically might be a little risky to mark this as refreshes_state because the user could make
@@ -719,7 +740,9 @@ def _modify_add_markdown_cell(notebook_path: str, cell_content: str, position_in
             if position_index is not None:
                 # Insert at specific position
                 notebook.insert_markdown_cell(position_index, cell_content)
-                results["message"] = f"Markdown cell inserted at position {position_index}"
+                results["message"] = (
+                    f"Markdown cell inserted at position {position_index}"
+                )
             else:
                 # Add at the end (original behavior)
                 notebook.add_markdown_cell(cell_content)

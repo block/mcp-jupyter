@@ -1,4 +1,5 @@
 import pytest
+
 from mcp_jupyter.server import (
     execute_notebook_code,
     modify_notebook_cells,

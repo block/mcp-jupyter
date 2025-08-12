@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, call, patch
 
 import requests
 from mcp.shared.exceptions import McpError
+
 from mcp_jupyter.notebook import (
     check_notebook_exists,
     create_new_notebook,
