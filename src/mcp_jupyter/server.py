@@ -334,8 +334,8 @@ def query_notebook(
 @NotebookState.refreshes_state
 def _query_view_source(
     notebook_path: str,
-    execution_count: Optional[Union[str, int, float]] = None,
-    position_index: Optional[int] = None,
+    execution_count: int = None,
+    position_index: int = None,
 ) -> Union[dict, list[dict]]:
     """View the source code of a Jupyter notebook (either single cell or all cells).
 
@@ -619,7 +619,7 @@ def _modify_add_code_cell(
     notebook_path: str,
     cell_content: str,
     execute: bool = True,
-    position_index: Optional[int] = None,
+    position_index: int = None,
 ) -> dict:
     """Add (and optionally execute) a code cell in a Jupyter notebook.
 

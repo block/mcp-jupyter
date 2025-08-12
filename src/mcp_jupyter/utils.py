@@ -38,50 +38,6 @@ def _ensure_ipynb_extension(notebook_path: str) -> str:
     return notebook_path
 
 
-def _extract_execution_count(execution_count: Union[str, int, float]) -> int:
-    """Extract the int version of the execution count from a string. We make the user provide this
-    as a parenthesized string to avoid confusion with the positional index that NBModelClient
-    uses under the hood (and not square brackets because this causes all kinds of problems with
-    pydantic, I think goose auto converts square brackets either to a list or to a string with
-    quotes included).
-
-    Args:
-        execution_count: the index (execution_count) that is visible to the user in the notebook UI.
-            Formatted like "(19)", a string starting and ending with parentheses, not including
-            quotes.
-
-    Returns
-    -------
-        int: the int execution count without the parentheses
-    """
-    if isinstance(execution_count, int):
-        return execution_count
-
-    if isinstance(execution_count, float):
-        return int(execution_count)
-
-    # Try parentheses format first
-    if execution_count.startswith("(") and execution_count.endswith(")"):
-        try:
-            return int(float(execution_count.strip("()")))
-        except ValueError:
-            pass
-
-    # Try plain string format
-    try:
-        # First try as integer
-        return int(execution_count)
-    except ValueError:
-        # Then try as float (in case execution_count is something like "1.0")
-        try:
-            return int(float(execution_count))
-        except ValueError:
-            raise ValueError(
-                f"Invalid execution_count: {execution_count!r}. "
-                "Should be an integer, a string like '19', or a string like '(19)'."
-            )
-
-
 def extract_output(output: dict) -> str:
     """Extract output from a Jupyter notebook cell.
 
