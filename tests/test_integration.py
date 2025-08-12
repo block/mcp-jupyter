@@ -55,6 +55,33 @@ def test_add_code_cell(jupyter_server, test_notebook):
 
     assert "x = 10" in output_text
 
+    # Test adding cell at specific position (not at the bottom)
+    # First get current cell count
+    all_cells_before = query_notebook(test_notebook, "view_source")
+    initial_count = len(all_cells_before)
+
+    # Add a cell at position 1 (second position)
+    positioned_result = modify_notebook_cells(
+        test_notebook,
+        "add_code",
+        "y = 20\nprint(f'y = {y}')",
+        position_index=1,
+        execute=False,
+    )
+
+    # Verify the cell was added (should be empty result since execute=False)
+    assert positioned_result == {}
+
+    # Check that the cell was inserted at the correct position
+    all_cells_after = query_notebook(test_notebook, "view_source")
+    assert len(all_cells_after) == initial_count + 1
+
+    # Verify the cell at position 1 contains our new content
+    inserted_cell = all_cells_after[1]
+    assert inserted_cell["cell_type"] == "code"
+    assert "y = 20" in inserted_cell["source"]
+    assert inserted_cell["execution_count"] is None  # Not executed
+
 
 @pytest.mark.integration
 def test_add_markdown_cell(jupyter_server, test_notebook):
@@ -142,7 +169,7 @@ def test_view_source(jupyter_server, test_notebook):
     # Now view just that specific cell by execution count (if it has one)
     if execution_count is not None:
         specific_cell = query_notebook(
-            test_notebook, "view_source", execution_count=str(execution_count)
+            test_notebook, "view_source", execution_count=int(execution_count)
         )
         assert isinstance(specific_cell, dict)
         assert "def add(a, b):" in specific_cell["source"]
@@ -202,7 +229,7 @@ def test_get_position_index(jupyter_server, test_notebook):
     # If we have an execution count, test that path too
     if execution_count is not None:
         position_by_exec = query_notebook(
-            test_notebook, "get_position_index", execution_count=str(execution_count)
+            test_notebook, "get_position_index", execution_count=int(execution_count)
         )
         assert position_by_exec == position_to_find
 
@@ -257,6 +284,44 @@ def test_edit_code_cell(jupyter_server, test_notebook):
         test_notebook, "view_source", position_index=position_index
     )
     assert "def multiply(a, b):" in updated_cell["source"]
+
+    # Test editing by execution_count (two-step workflow)
+    # Get the execution_count of the cell we just edited
+    execution_count = updated_cell.get("execution_count")
+    assert execution_count is not None, (
+        "Cell should have execution_count after being executed"
+    )
+
+    # Step 1: Find position by execution_count
+    found_position = query_notebook(
+        test_notebook, "get_position_index", execution_count=execution_count
+    )
+    assert found_position == position_index, (
+        "execution_count lookup should return same position"
+    )
+
+    # Step 2: Edit the cell using the found position
+    modified_code2 = "def divide(a, b):\n    return a / b\n\nprint(divide(12, 3))"
+    result2 = modify_notebook_cells(
+        test_notebook, "edit_code", modified_code2, found_position
+    )
+
+    # Verify the second edit worked
+    assert "execution_count" in result2
+    assert result2["status"] == "ok"
+
+    # Check output content
+    output_text2 = ""
+    for output in result2["outputs"]:
+        if output["output_type"] == "stream":
+            output_text2 += output["text"]
+    assert "4.0" in output_text2  # 12 / 3 = 4.0
+
+    # Verify the cell content changed again
+    final_cell = query_notebook(
+        test_notebook, "view_source", position_index=position_index
+    )
+    assert "def divide(a, b):" in final_cell["source"]
 
 
 @pytest.mark.integration
