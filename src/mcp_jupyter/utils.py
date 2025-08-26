@@ -80,14 +80,33 @@ def filter_image_outputs(outputs: List[dict]) -> List[dict]:
                         # If there's already text/plain content (like "<Figure size...>"),
                         # append the indicator to show image was filtered
                         existing_text = filtered_data["text/plain"]
-                        if "Figure" in existing_text or "Axes" in existing_text:
+
+                        # Handle both string and list formats
+                        if isinstance(existing_text, list):
+                            existing_text_str = "".join(existing_text)
+                        else:
+                            existing_text_str = existing_text
+
+                        if "Figure" in existing_text_str or "Axes" in existing_text_str:
                             # Keep the existing figure description and add our indicator
-                            filtered_data["text/plain"] = (
-                                existing_text + f" - {image_indicator}"
-                            )
+                            if isinstance(existing_text, list):
+                                filtered_data["text/plain"] = existing_text + [
+                                    f" - {image_indicator}"
+                                ]
+                            else:
+                                filtered_data["text/plain"] = (
+                                    existing_text + f" - {image_indicator}"
+                                )
                         else:
                             # For other text, append on new line
-                            filtered_data["text/plain"] += f"\n{image_indicator}"
+                            if isinstance(existing_text, list):
+                                filtered_data["text/plain"] = existing_text + [
+                                    f"\n{image_indicator}"
+                                ]
+                            else:
+                                filtered_data["text/plain"] = (
+                                    existing_text + f"\n{image_indicator}"
+                                )
                     else:
                         # Create new text/plain output
                         filtered_data["text/plain"] = image_indicator
