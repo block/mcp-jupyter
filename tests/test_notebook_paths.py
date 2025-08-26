@@ -78,7 +78,7 @@ class TestNotebookPaths(unittest.TestCase):
         token = "test-token"
 
         # Execute
-        create_new_notebook(notebook_path, cells, server_url, token)
+        create_new_notebook(notebook_path, server_url, token)
 
         # Assert
         # Check that GET was called to check the directory
@@ -114,7 +114,7 @@ class TestNotebookPaths(unittest.TestCase):
         mock_put.reset_mock()
 
         # Execute
-        create_new_notebook(notebook_path, cells, server_url, token)
+        create_new_notebook(notebook_path, server_url, token)
 
         # Assert
         # Check that GET was called to check the directory
@@ -217,7 +217,7 @@ class TestNotebookPaths(unittest.TestCase):
             server_url = "http://prepare.it:8888"
             token = "prep-token"
             cells = ["import os"]
-            result = prepare_notebook(notebook_path, cells, server_url, token)
+            result = prepare_notebook(notebook_path, server_url, token)
 
         # Assertions
         # Check GET calls

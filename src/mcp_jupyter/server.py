@@ -26,6 +26,7 @@ from .utils import (
     TOKEN,
     _ensure_ipynb_extension,
     extract_output,
+    filter_image_outputs,
 )
 
 # Initialize FastMCP server
@@ -238,6 +239,7 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
     logger.info(f"Creating notebook client with server_url={server_url}")
 
+    notebook = None
     try:
         notebook = NbModelClient(
             get_jupyter_notebook_websocket_url(
@@ -249,7 +251,8 @@ def notebook_client(notebook_path: str, server_url: str = None):
         notebook.start()
         yield notebook
     finally:
-        notebook.stop()
+        if notebook is not None:
+            notebook.stop()
 
 
 @mcp.tool()
@@ -264,6 +267,19 @@ def query_notebook(
     """Query notebook information and metadata on the user-provided server.
 
     This consolidates all read-only operations into a single tool following MCP best practices.
+
+    IMPORTANT: Server URL Configuration
+    ----------------------------------
+    This tool requires a server URL to connect to your Jupyter server. You have two options:
+
+    Option 1 - Call setup_notebook first (RECOMMENDED):
+        setup_notebook("my_notebook", server_url="http://localhost:9999")
+        query_notebook("my_notebook", "view_source")  # Uses stored URL automatically
+
+    Option 2 - Pass server_url explicitly every time:
+        query_notebook("my_notebook", "view_source", server_url="http://localhost:9999")
+
+    If neither is done, it defaults to http://localhost:8888 which may not be correct.
 
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
@@ -285,7 +301,8 @@ def query_notebook(
             Works for all cell types (code, markdown, raw). Must be an integer.
         cell_id: (For get_position_index) Cell ID like "205658d6-093c-4722-854c-90b149f254ad".
             This is a unique identifier for each cell, visible in notebook metadata.
-        server_url: (For check_server/list_sessions) Server URL (default: http://localhost:8888)
+        server_url: Server URL to connect to. If not provided, uses the URL stored by setup_notebook,
+                   or falls back to http://localhost:8888
 
     Returns
     -------
@@ -318,7 +335,9 @@ def query_notebook(
         McpError: If there's an error connecting to the Jupyter server
     """
     if query_type == "view_source":
-        return _query_view_source(notebook_path, execution_count, position_index)
+        return _query_view_source(
+            notebook_path, execution_count, position_index, server_url
+        )
     elif query_type == "check_server":
         return _query_check_server(server_url or "http://localhost:8888")
     elif query_type == "list_sessions":
@@ -331,11 +350,74 @@ def query_notebook(
         )
 
 
-@NotebookState.refreshes_state
+def _filter_cell_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list[dict]]:
+    """Filter out verbose output data from cell data, keeping only source and basic metadata."""
+
+    def filter_single_cell(cell: dict) -> dict:
+        if not isinstance(cell, dict):
+            return cell
+
+        # Keep essential cell data but filter outputs
+        filtered_cell = {
+            "cell_type": cell.get("cell_type"),
+            "source": cell.get("source"),
+            "metadata": cell.get("metadata", {}),
+        }
+
+        # For code cells, keep execution_count but filter outputs
+        if cell.get("cell_type") == "code":
+            filtered_cell["execution_count"] = cell.get("execution_count")
+
+            # Keep outputs but filter out large base64 data
+            if "outputs" in cell:
+                filtered_outputs = []
+                for output in cell["outputs"]:
+                    if isinstance(output, dict):
+                        filtered_output = {
+                            "output_type": output.get("output_type"),
+                        }
+
+                        # Keep text outputs but filter images and large data
+                        if "text" in output:
+                            filtered_output["text"] = output["text"]
+                        if "name" in output:
+                            filtered_output["name"] = output["name"]
+
+                        # For data outputs, indicate presence without including content
+                        if "data" in output:
+                            data_types = list(output["data"].keys())
+                            if any(
+                                "image" in dt or "png" in dt or "jpeg" in dt
+                                for dt in data_types
+                            ):
+                                filtered_output["data"] = {
+                                    "[filtered]": f"Image data present ({', '.join(data_types)})"
+                                }
+                            elif any("html" in dt for dt in data_types):
+                                filtered_output["data"] = {
+                                    "[filtered]": f"HTML data present ({', '.join(data_types)})"
+                                }
+                            else:
+                                # Keep small text data
+                                filtered_output["data"] = output["data"]
+
+                        filtered_outputs.append(filtered_output)
+
+                filtered_cell["outputs"] = filtered_outputs
+
+        return filtered_cell
+
+    if isinstance(cell_data, list):
+        return [filter_single_cell(cell) for cell in cell_data]
+    else:
+        return filter_single_cell(cell_data)
+
+
 def _query_view_source(
     notebook_path: str,
     execution_count: int = None,
     position_index: int = None,
+    server_url: str = None,
 ) -> Union[dict, list[dict]]:
     """View the source code of a Jupyter notebook (either single cell or all cells).
 
@@ -357,15 +439,46 @@ def _query_view_source(
     else:
         view_all = False
 
-    with notebook_client(notebook_path) as notebook:
+    with notebook_client(notebook_path, server_url) as notebook:
         if view_all:
-            return notebook._doc.ycells.to_py()
+            raw_cells = notebook._doc.ycells.to_py()
+            return _filter_cell_outputs(raw_cells)
 
         if position_index is None:
-            position_index = _query_get_position_index(
-                notebook_path, execution_count=execution_count
-            )
-        return notebook[position_index]
+            # Find position index within the current notebook context
+            position_indices = set()
+            execution_count_int = execution_count if execution_count is not None else -1
+
+            for i, cell in enumerate(notebook._doc.ycells):
+                if cell.get("execution_count") == execution_count_int:
+                    position_indices.add(i)
+
+            if len(position_indices) != 1:
+                # Get comprehensive cell information for better error message
+                cells_info = _get_available_execution_counts(notebook_path)
+
+                if len(position_indices) == 0:
+                    error_parts = []
+                    if execution_count is not None:
+                        error_parts.append(f"execution count {execution_count}")
+
+                    error_msg = f"No cells found with {' and '.join(error_parts)}."
+
+                    if cells_info["execution_counts"]:
+                        error_msg += f" Available execution counts: {cells_info['execution_counts']}"
+                    else:
+                        error_msg += " No cells have been executed yet."
+
+                    raise ValueError(error_msg)
+                else:
+                    raise ValueError(
+                        f"Multiple cells found with execution count {execution_count}"
+                    )
+
+            position_index = position_indices.pop()
+
+        raw_cell = notebook[position_index]
+        return _filter_cell_outputs(raw_cell)
 
 
 def _query_check_server(server_url: str) -> str:
@@ -559,11 +672,23 @@ def modify_notebook_cells(
     position_index: int = None,
     execute: bool = True,
 ) -> dict:
-    """Modify notebook cells (add, edit, delete) on the user-provided server.
+    r"""Modify notebook cells (add, edit, delete) on the user-provided server.
 
     This consolidates all cell modification operations into a single tool following MCP best practices.
     Default to execute=True unless the user requests otherwise or you have good reason not to
     execute immediately.
+
+    IMPORTANT: Server URL Configuration
+    ----------------------------------
+    This tool requires that you first call setup_notebook with the correct server URL:
+
+    Required setup:
+        setup_notebook(\"my_notebook\", server_url=\"http://localhost:9999\")
+
+    Then you can use this tool:
+        modify_notebook_cells(\"my_notebook\", \"add_code\", \"print('Hello')\")
+
+    Without setup_notebook, this will try to connect to http://localhost:8888 by default.
 
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
@@ -858,9 +983,21 @@ def execute_notebook_code(
     position_index: int = None,
     package_names: str = None,
 ) -> Union[dict, str]:
-    """Execute code in a Jupyter notebook on the user-provided server.
+    r"""Execute code in a Jupyter notebook on the user-provided server.
 
     This consolidates all code execution operations into a single tool following MCP best practices.
+
+    IMPORTANT: Server URL Configuration
+    ----------------------------------
+    This tool requires that you first call setup_notebook with the correct server URL:
+
+    Required setup:
+        setup_notebook(\"my_notebook\", server_url=\"http://localhost:9999\")
+
+    Then you can use this tool:
+        execute_notebook_code(\"my_notebook\", \"execute_cell\", position_index=0)
+
+    Without setup_notebook, this will try to connect to http://localhost:8888 by default.
 
     Args:
         notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
@@ -923,7 +1060,13 @@ def _execute_cell_internal(notebook_path: str, position_index: int) -> dict:
     kernel = get_kernel(notebook_path)
 
     with notebook_client(notebook_path) as notebook:
-        return notebook.execute_cell(position_index, kernel)
+        result = notebook.execute_cell(position_index, kernel)
+
+        # Filter out base64 images from outputs to save tokens
+        if "outputs" in result:
+            result["outputs"] = filter_image_outputs(result["outputs"])
+
+        return result
 
 
 def _execute_install_packages(notebook_path: str, package_names: str) -> str:
@@ -955,8 +1098,12 @@ def _execute_install_packages(notebook_path: str, package_names: str) -> str:
             cell_index = notebook.add_code_cell(cell_content)
             result = notebook.execute_cell(cell_index, current_kernel)
 
-            # Extract output to see if installation was successful
+            # Filter out base64 images from outputs to save tokens
             outputs = result.get("outputs", [])
+            if len(outputs) > 0:
+                outputs = filter_image_outputs(outputs)
+
+            # Extract output to see if installation was successful
             if len(outputs) == 0:
                 installation_result = "No output from installation command"
             else:
@@ -971,11 +1118,24 @@ def _execute_install_packages(notebook_path: str, package_names: str) -> str:
 
 @mcp.tool()
 @NotebookState.refreshes_state
-def setup_notebook(
-    notebook_path: str, cells: list = None, server_url: str = None
-) -> dict:
-    """Prepare notebook for use and connect to the kernel on the user-provided server.
-    Will create a new Jupyter notebook if needed on the server.
+def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
+    r"""Prepare notebook for use and connect to the kernel on the user-provided server.
+    Will create a new empty Jupyter notebook if needed on the server.
+
+    **CALL THIS FIRST** - This tool must be called before using other notebook tools
+    to establish the server URL connection. All subsequent notebook operations will
+    use the server URL stored by this tool.
+
+    This tool creates an empty notebook. To add content, use the modify_notebook_cells
+    tool after creation:
+
+    Example usage:
+        # Step 1: REQUIRED - Setup notebook with correct server URL
+        setup_notebook("demo", server_url="http://localhost:9999")
+
+        # Step 2: Add cells (these now use the stored server URL automatically)
+        modify_notebook_cells("demo", "add_markdown", "# Title\\n\\nDescription")
+        modify_notebook_cells("demo", "add_code", "print('Hello World')")
 
     This tool assumes a Jupyter server is already running and accessible at the specified
     `server_url`. It connects to this existing server to manage the notebook.
@@ -985,9 +1145,10 @@ def setup_notebook(
 
     Args:
         notebook_path: Path to the notebook, relative to the Jupyter server root.
-        cells: Optional list of initial cell contents for a new notebook.
-        server_url: Optional Jupyter server URL (default: http://localhost:8888). This URL
-                    will be stored and used for subsequent interactions with this notebook.
+        server_url: Jupyter server URL (HIGHLY RECOMMENDED to specify explicitly).
+                    This URL will be stored and used for subsequent interactions with this notebook.
+                    If not provided, defaults to http://localhost:8888 which may not be correct for your setup.
+                    Common values: http://localhost:8888, http://localhost:9999, etc.
 
     Returns
     -------
@@ -1007,7 +1168,7 @@ def setup_notebook(
     # Use the notebook module but with the local TOKEN
     from .notebook import prepare_notebook
 
-    info = prepare_notebook(notebook_path, cells, server_url, TOKEN)
+    info = prepare_notebook(notebook_path, server_url, TOKEN)
 
     # Refresh the state hash
     time.sleep(0.5)  # Short delay to ensure notebook is fully saved

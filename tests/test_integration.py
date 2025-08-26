@@ -23,13 +23,13 @@ def test_notebook_creation(jupyter_server):
     notebook_name = "test_creation"
 
     # Create a new notebook - specify server_url on creation
-    result = setup_notebook(notebook_name, [], server_url=jupyter_server)
+    result = setup_notebook(notebook_name, server_url=jupyter_server)
     assert result is not None
     assert "message" in result
     assert result["message"] == f"Notebook {notebook_name}.ipynb created"
 
     # Try creating the same notebook again - no need to specify server_url
-    result = setup_notebook(notebook_name, [])
+    result = setup_notebook(notebook_name)
     assert result["message"] == f"Notebook {notebook_name}.ipynb already exists"
 
 
@@ -462,9 +462,7 @@ def test_notebook_creation_with_new_directory(jupyter_server):
     relative_notebook_path = f"{dir_name}/{notebook_base_name}"
 
     # 1. Attempt to create the notebook (this should also create the directory)
-    creation_result = setup_notebook(
-        relative_notebook_path, [], server_url=jupyter_server
-    )
+    creation_result = setup_notebook(relative_notebook_path, server_url=jupyter_server)
     assert "message" in creation_result
     assert "created" in creation_result["message"]  # Check it was created
 

@@ -57,15 +57,12 @@ def check_notebook_exists(notebook_path: str, server_url: str, token: str) -> bo
         return False
 
 
-def create_new_notebook(
-    notebook_path: str, cells: List[str], server_url: str, token: str
-) -> None:
-    """Create a new Jupyter notebook.
+def create_new_notebook(notebook_path: str, server_url: str, token: str) -> None:
+    """Create a new empty Jupyter notebook.
 
     Args:
         notebook_path: Path where to create the notebook, relative to Jupyter server root.
                        Intermediate directories will be created if they don't exist.
-        cells: List of cell contents to add
         server_url: Jupyter server URL
         token: Authentication token
 
@@ -135,18 +132,7 @@ def create_new_notebook(
         },
     }
 
-    # Add any specified cells
-    if cells:
-        for cell_content in cells:
-            notebook_content["content"]["cells"].append(
-                {
-                    "cell_type": "code",
-                    "metadata": {},
-                    "source": cell_content,
-                    "execution_count": None,
-                    "outputs": [],
-                }
-            )
+    # Notebook starts empty - use modify_notebook_cells to add content
 
     # Make the API request to create the notebook
     try:
@@ -307,15 +293,16 @@ def get_notebook_info(
 
 def prepare_notebook(
     notebook_path: str,
-    cells: Optional[List[str]] = None,
     server_url: str = "http://localhost:8888",
     token: str = None,
 ) -> Dict[str, Any]:
     """Prepare notebook for use and start kernel.
 
+    Creates an empty notebook if it doesn't exist. To add content, use the
+    modify_notebook_cells operations after creation.
+
     Args:
         notebook_path: Path to the notebook, relative to Jupyter server root
-        cells: List of cell contents (optional)
         server_url: Jupyter server URL
         token: Authentication token (defaults to env var)
 
@@ -338,7 +325,7 @@ def prepare_notebook(
 
         # Create notebook if it doesn't exist
         if not notebook_exists:
-            create_new_notebook(notebook_path, cells or [], server_url, token)
+            create_new_notebook(notebook_path, server_url, token)
             notebook_created = True
         else:
             notebook_created = False

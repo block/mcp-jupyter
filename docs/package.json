@@ -44,5 +44,11 @@
   },
   "engines": {
     "node": ">=18.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici": "5.28.4",
+      "jiti": "1.20.0"
+    }
   }
 }

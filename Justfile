@@ -1,5 +1,5 @@
 # Run all CI checks locally (matches GitHub Actions)
-ci: test lint format
+ci: test lint format build
     @echo "✅ All CI checks passed!"
 
 # Run tests (matches: uv run pytest tests)
@@ -16,3 +16,8 @@ lint:
 format:
     @echo "🎨 Checking and fixing formatting..."
     uvx ruff format
+
+# Build documentation (matches: pnpm build in docs/)
+build:
+    @echo "📚 Building documentation..."
+    cd docs && pnpm start
