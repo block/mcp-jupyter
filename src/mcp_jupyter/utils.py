@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from functools import wraps
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import requests
 from jupyter_kernel_client import KernelClient
@@ -36,6 +36,63 @@ def _ensure_ipynb_extension(notebook_path: str) -> str:
     if not notebook_path.endswith(".ipynb"):
         return f"{notebook_path}.ipynb"
     return notebook_path
+
+
+def filter_image_outputs(outputs: List[dict]) -> List[dict]:
+    """Filter out base64 images and replace with text indicators.
+    
+    Args:
+        outputs: List of output dictionaries from cell execution
+        
+    Returns
+    -------
+        List[dict]: Filtered outputs with images replaced by text indicators
+    """
+    filtered_outputs = []
+    
+    for output in outputs:
+        # Create a copy of the output to avoid modifying the original
+        filtered_output = output.copy()
+        
+        # Check for image data in display_data or execute_result outputs
+        if output.get("output_type") in ["display_data", "execute_result"]:
+            data = output.get("data", {})
+            if data:
+                # Create a copy of data to avoid modifying the original
+                filtered_data = data.copy()
+                
+                # Check for various image formats and replace with text indicators
+                image_types = ["image/png", "image/jpeg", "image/svg+xml", "image/gif"]
+                images_found = []
+                
+                for img_type in image_types:
+                    if img_type in filtered_data:
+                        # Remove the base64 image data
+                        del filtered_data[img_type]
+                        images_found.append(img_type.split("/")[1].upper())
+                
+                if images_found:
+                    # Add a text indicator for the removed images
+                    image_indicator = f"Image generated ({', '.join(images_found)} format)"
+                    if "text/plain" in filtered_data:
+                        # If there's already text/plain content (like "<Figure size...>"), 
+                        # append the indicator to show image was filtered
+                        existing_text = filtered_data["text/plain"]
+                        if "Figure" in existing_text or "Axes" in existing_text:
+                            # Keep the existing figure description and add our indicator
+                            filtered_data["text/plain"] = existing_text + f" - {image_indicator}"
+                        else:
+                            # For other text, append on new line
+                            filtered_data["text/plain"] += f"\n{image_indicator}"
+                    else:
+                        # Create new text/plain output
+                        filtered_data["text/plain"] = image_indicator
+                
+                filtered_output["data"] = filtered_data
+        
+        filtered_outputs.append(filtered_output)
+    
+    return filtered_outputs
 
 
 def extract_output(output: dict) -> str:
