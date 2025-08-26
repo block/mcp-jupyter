@@ -462,9 +462,7 @@ def test_notebook_creation_with_new_directory(jupyter_server):
     relative_notebook_path = f"{dir_name}/{notebook_base_name}"
 
     # 1. Attempt to create the notebook (this should also create the directory)
-    creation_result = setup_notebook(
-        relative_notebook_path, server_url=jupyter_server
-    )
+    creation_result = setup_notebook(relative_notebook_path, server_url=jupyter_server)
     assert "message" in creation_result
     assert "created" in creation_result["message"]  # Check it was created
 

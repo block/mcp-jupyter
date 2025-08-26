@@ -5,6 +5,10 @@ slug: /
 
 # Introduction
 
+:::warning API Compatibility Notice
+This project is currently focused on MCP (Model Context Protocol) usage. There are **no API compatibility guarantees** between versions as the interface is actively evolving. Breaking changes may occur in any release.
+:::
+
 MCP Jupyter Server allows you to use AI assistants like [Goose](https://block.github.io/goose/) or Cursor to pair with you in JupyterLab notebooks where the state of your variables is preserved by the JupyterLab Kernel.
 
 ## Why MCP Jupyter?

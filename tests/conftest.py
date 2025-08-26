@@ -144,20 +144,18 @@ def test_notebook(jupyter_server):
 
     # Create an empty notebook
     result = setup_notebook(notebook_name, server_url=jupyter_server)
-    
+
     # Add initial cells using modify_notebook_cells
     from mcp_jupyter.server import modify_notebook_cells
-    
+
     modify_notebook_cells(
-        notebook_name,
-        "add_code", 
-        "# Initial cell\nprint('Hello from initial cell')"
+        notebook_name, "add_code", "# Initial cell\nprint('Hello from initial cell')"
     )
-    
+
     modify_notebook_cells(
         notebook_name,
         "add_code",
-        "def add(a, b):\n    return a + b\n\nprint(add(2, 3))"
+        "def add(a, b):\n    return a + b\n\nprint(add(2, 3))",
     )
 
     # Small delay to ensure notebook is fully saved and available

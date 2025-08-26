@@ -1,5 +1,7 @@
 # Jupyter MCP Server
 
+> **⚠️ API Compatibility Notice**: This project is currently focused on MCP (Model Context Protocol) usage. There are **no API compatibility guarantees** between versions as the interface is actively evolving. Breaking changes may occur in any release.
+
 Jupyter MCP Server allows you to use tools like [Goose](https://block.github.io/goose/) or Cursor to pair with you in a JupyterLab notebook where the state of your variables, etc is preserved by the JupyterLab Kernel.  The fact that state is preserved is the key to this because it allows to to pair with the Agent in a notebook, where for example if a package is not installed it will see the error and install it for you.   You as the user can then do some data exploration and then hand off to the agent at any time to pick up where you left off.
 
 ## Key Features

@@ -271,14 +271,14 @@ def query_notebook(
     IMPORTANT: Server URL Configuration
     ----------------------------------
     This tool requires a server URL to connect to your Jupyter server. You have two options:
-    
+
     Option 1 - Call setup_notebook first (RECOMMENDED):
         setup_notebook("my_notebook", server_url="http://localhost:9999")
         query_notebook("my_notebook", "view_source")  # Uses stored URL automatically
-    
+
     Option 2 - Pass server_url explicitly every time:
         query_notebook("my_notebook", "view_source", server_url="http://localhost:9999")
-    
+
     If neither is done, it defaults to http://localhost:8888 which may not be correct.
 
     Args:
@@ -335,7 +335,9 @@ def query_notebook(
         McpError: If there's an error connecting to the Jupyter server
     """
     if query_type == "view_source":
-        return _query_view_source(notebook_path, execution_count, position_index, server_url)
+        return _query_view_source(
+            notebook_path, execution_count, position_index, server_url
+        )
     elif query_type == "check_server":
         return _query_check_server(server_url or "http://localhost:8888")
     elif query_type == "list_sessions":
@@ -350,21 +352,22 @@ def query_notebook(
 
 def _filter_cell_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list[dict]]:
     """Filter out verbose output data from cell data, keeping only source and basic metadata."""
+
     def filter_single_cell(cell: dict) -> dict:
         if not isinstance(cell, dict):
             return cell
-        
+
         # Keep essential cell data but filter outputs
         filtered_cell = {
             "cell_type": cell.get("cell_type"),
             "source": cell.get("source"),
             "metadata": cell.get("metadata", {}),
         }
-        
+
         # For code cells, keep execution_count but filter outputs
         if cell.get("cell_type") == "code":
             filtered_cell["execution_count"] = cell.get("execution_count")
-            
+
             # Keep outputs but filter out large base64 data
             if "outputs" in cell:
                 filtered_outputs = []
@@ -373,30 +376,37 @@ def _filter_cell_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list
                         filtered_output = {
                             "output_type": output.get("output_type"),
                         }
-                        
+
                         # Keep text outputs but filter images and large data
                         if "text" in output:
                             filtered_output["text"] = output["text"]
                         if "name" in output:
                             filtered_output["name"] = output["name"]
-                        
+
                         # For data outputs, indicate presence without including content
                         if "data" in output:
                             data_types = list(output["data"].keys())
-                            if any("image" in dt or "png" in dt or "jpeg" in dt for dt in data_types):
-                                filtered_output["data"] = {"[filtered]": f"Image data present ({', '.join(data_types)})"}
+                            if any(
+                                "image" in dt or "png" in dt or "jpeg" in dt
+                                for dt in data_types
+                            ):
+                                filtered_output["data"] = {
+                                    "[filtered]": f"Image data present ({', '.join(data_types)})"
+                                }
                             elif any("html" in dt for dt in data_types):
-                                filtered_output["data"] = {"[filtered]": f"HTML data present ({', '.join(data_types)})"}
+                                filtered_output["data"] = {
+                                    "[filtered]": f"HTML data present ({', '.join(data_types)})"
+                                }
                             else:
                                 # Keep small text data
                                 filtered_output["data"] = output["data"]
-                        
+
                         filtered_outputs.append(filtered_output)
-                
+
                 filtered_cell["outputs"] = filtered_outputs
-        
+
         return filtered_cell
-    
+
     if isinstance(cell_data, list):
         return [filter_single_cell(cell) for cell in cell_data]
     else:
@@ -438,33 +448,35 @@ def _query_view_source(
             # Find position index within the current notebook context
             position_indices = set()
             execution_count_int = execution_count if execution_count is not None else -1
-            
+
             for i, cell in enumerate(notebook._doc.ycells):
                 if cell.get("execution_count") == execution_count_int:
                     position_indices.add(i)
-            
+
             if len(position_indices) != 1:
                 # Get comprehensive cell information for better error message
                 cells_info = _get_available_execution_counts(notebook_path)
-                
+
                 if len(position_indices) == 0:
                     error_parts = []
                     if execution_count is not None:
                         error_parts.append(f"execution count {execution_count}")
-                    
+
                     error_msg = f"No cells found with {' and '.join(error_parts)}."
-                    
+
                     if cells_info["execution_counts"]:
                         error_msg += f" Available execution counts: {cells_info['execution_counts']}"
                     else:
                         error_msg += " No cells have been executed yet."
-                    
+
                     raise ValueError(error_msg)
                 else:
-                    raise ValueError(f"Multiple cells found with execution count {execution_count}")
-            
+                    raise ValueError(
+                        f"Multiple cells found with execution count {execution_count}"
+                    )
+
             position_index = position_indices.pop()
-        
+
         raw_cell = notebook[position_index]
         return _filter_cell_outputs(raw_cell)
 
@@ -669,13 +681,13 @@ def modify_notebook_cells(
     IMPORTANT: Server URL Configuration
     ----------------------------------
     This tool requires that you first call setup_notebook with the correct server URL:
-    
+
     Required setup:
         setup_notebook(\"my_notebook\", server_url=\"http://localhost:9999\")
-        
+
     Then you can use this tool:
         modify_notebook_cells(\"my_notebook\", \"add_code\", \"print('Hello')\")
-    
+
     Without setup_notebook, this will try to connect to http://localhost:8888 by default.
 
     Args:
@@ -978,13 +990,13 @@ def execute_notebook_code(
     IMPORTANT: Server URL Configuration
     ----------------------------------
     This tool requires that you first call setup_notebook with the correct server URL:
-    
+
     Required setup:
         setup_notebook(\"my_notebook\", server_url=\"http://localhost:9999\")
-        
+
     Then you can use this tool:
         execute_notebook_code(\"my_notebook\", \"execute_cell\", position_index=0)
-    
+
     Without setup_notebook, this will try to connect to http://localhost:8888 by default.
 
     Args:
@@ -1049,11 +1061,11 @@ def _execute_cell_internal(notebook_path: str, position_index: int) -> dict:
 
     with notebook_client(notebook_path) as notebook:
         result = notebook.execute_cell(position_index, kernel)
-        
+
         # Filter out base64 images from outputs to save tokens
         if "outputs" in result:
             result["outputs"] = filter_image_outputs(result["outputs"])
-        
+
         return result
 
 
@@ -1090,7 +1102,7 @@ def _execute_install_packages(notebook_path: str, package_names: str) -> str:
             outputs = result.get("outputs", [])
             if len(outputs) > 0:
                 outputs = filter_image_outputs(outputs)
-            
+
             # Extract output to see if installation was successful
             if len(outputs) == 0:
                 installation_result = "No output from installation command"
@@ -1116,11 +1128,11 @@ def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
 
     This tool creates an empty notebook. To add content, use the modify_notebook_cells
     tool after creation:
-    
+
     Example usage:
         # Step 1: REQUIRED - Setup notebook with correct server URL
         setup_notebook("demo", server_url="http://localhost:9999")
-        
+
         # Step 2: Add cells (these now use the stored server URL automatically)
         modify_notebook_cells("demo", "add_markdown", "# Title\\n\\nDescription")
         modify_notebook_cells("demo", "add_code", "print('Hello World')")
