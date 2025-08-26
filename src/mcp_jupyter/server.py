@@ -971,11 +971,20 @@ def _execute_install_packages(notebook_path: str, package_names: str) -> str:
 
 @mcp.tool()
 @NotebookState.refreshes_state
-def setup_notebook(
-    notebook_path: str, cells: list = None, server_url: str = None
-) -> dict:
+def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
     """Prepare notebook for use and connect to the kernel on the user-provided server.
-    Will create a new Jupyter notebook if needed on the server.
+    Will create a new empty Jupyter notebook if needed on the server.
+
+    This tool creates an empty notebook. To add content, use the modify_notebook_cells
+    tool after creation:
+    
+    Example usage:
+        # Step 1: Create empty notebook
+        setup_notebook("demo.ipynb")
+        
+        # Step 2: Add cells with specific types
+        modify_notebook_cells("demo.ipynb", "add_markdown", "# Title\\n\\nDescription")
+        modify_notebook_cells("demo.ipynb", "add_code", "print('Hello World')")
 
     This tool assumes a Jupyter server is already running and accessible at the specified
     `server_url`. It connects to this existing server to manage the notebook.
@@ -985,7 +994,6 @@ def setup_notebook(
 
     Args:
         notebook_path: Path to the notebook, relative to the Jupyter server root.
-        cells: Optional list of initial cell contents for a new notebook.
         server_url: Optional Jupyter server URL (default: http://localhost:8888). This URL
                     will be stored and used for subsequent interactions with this notebook.
 
@@ -1007,7 +1015,7 @@ def setup_notebook(
     # Use the notebook module but with the local TOKEN
     from .notebook import prepare_notebook
 
-    info = prepare_notebook(notebook_path, cells, server_url, TOKEN)
+    info = prepare_notebook(notebook_path, server_url, TOKEN)
 
     # Refresh the state hash
     time.sleep(0.5)  # Short delay to ensure notebook is fully saved
