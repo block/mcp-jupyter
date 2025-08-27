@@ -1178,6 +1178,11 @@ def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
 
     info = prepare_notebook(notebook_path, server_url, TOKEN)
 
+    # Filter the notebook content to remove base64 images
+    if "content" in info and info["content"]:
+        if "cells" in info["content"]:
+            info["content"]["cells"] = _filter_cell_outputs(info["content"]["cells"])
+
     # Refresh the state hash
     time.sleep(0.5)  # Short delay to ensure notebook is fully saved
     NotebookState.update_hash(notebook_path, server_url, caller="notebook_final")
