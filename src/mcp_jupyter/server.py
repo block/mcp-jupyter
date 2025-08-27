@@ -335,15 +335,23 @@ def query_notebook(
         McpError: If there's an error connecting to the Jupyter server
     """
     if query_type == "view_source":
-        return _query_view_source(
+        result = _query_view_source(
             notebook_path, execution_count, position_index, server_url
         )
+        # Update hash after viewing notebook content
+        NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
+        return result
     elif query_type == "check_server":
+        # No notebook access, no hash update needed
         return _query_check_server(server_url or "http://localhost:8888")
     elif query_type == "list_sessions":
+        # No notebook access, no hash update needed
         return _query_list_sessions(server_url or "http://localhost:8888")
     elif query_type == "get_position_index":
-        return _query_get_position_index(notebook_path, execution_count, cell_id)
+        result = _query_get_position_index(notebook_path, execution_count, cell_id)
+        # This accesses notebook content, so update hash
+        NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
+        return result
     else:
         raise ValueError(
             f"Invalid query_type: {query_type}. Must be one of: view_source, check_server, list_sessions, get_position_index"
@@ -1169,6 +1177,11 @@ def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
     from .notebook import prepare_notebook
 
     info = prepare_notebook(notebook_path, server_url, TOKEN)
+
+    # Filter the notebook content to remove base64 images
+    if "content" in info and info["content"]:
+        if "cells" in info["content"]:
+            info["content"]["cells"] = _filter_cell_outputs(info["content"]["cells"])
 
     # Refresh the state hash
     time.sleep(0.5)  # Short delay to ensure notebook is fully saved
