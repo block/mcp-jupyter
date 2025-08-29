@@ -1,3 +1,3 @@
-from mcp_juypter import main
+from mcp_jupyter import main
 
 main()

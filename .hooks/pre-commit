@@ -1,0 +1,2 @@
+$(git rev-parse --show-toplevel)/.hooks/pre-commit-py
+exit $?
