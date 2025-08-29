@@ -29,7 +29,8 @@ from .utils import (
     filter_image_outputs,
 )
 
-# Initialize FastMCP server
+# Initialize FastMCP server with default settings
+# This ensures tools are available when module is imported
 mcp = FastMCP("notebook")
 
 
@@ -1190,7 +1191,42 @@ def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
     return info
 
 
+def create_server(
+    host: str = "127.0.0.1", port: int = 8000, stateless_http: bool = False
+) -> FastMCP:
+    """Create and configure the FastMCP server instance.
+
+    Args:
+        host: Server host address
+        port: Server port number
+        stateless_http: If True, enables stateless HTTP mode (no session persistence)
+    """
+    global mcp
+    # If custom settings are provided, recreate the server with those settings
+    if host != "127.0.0.1" or port != 8000 or stateless_http:
+        mcp = FastMCP("notebook", host=host, port=port, stateless_http=stateless_http)
+
+        # Re-register all the tools
+        mcp.tool()(query_notebook)
+        mcp.tool()(modify_notebook_cells)
+        mcp.tool()(execute_notebook_code)
+        mcp.tool()(setup_notebook)
+
+    return mcp
+
+
 if __name__ == "__main__":
+    import sys
+
+    # Check for transport argument
+    transport = "stdio"  # default
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ["--http", "-h"]:
+            transport = "streamable-http"
+
+    # Create server with default settings
+    server = create_server()
+
     # Initialize and run the server
-    logger.info("Starting MCP notebook server")
-    mcp.run(transport="stdio")
+    logger.info(f"Starting MCP notebook server with {transport} transport")
+    server.run(transport=transport)

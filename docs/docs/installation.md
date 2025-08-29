@@ -75,6 +75,28 @@ uvx mcp-jupyter
 
 This command will automatically download and run the latest version.
 
+### Transport Modes
+
+MCP Jupyter supports two transport protocols:
+
+- **stdio** (default) - Standard input/output communication, ideal for IDE integration
+- **http** - Streamable HTTP transport with session management, ideal for web clients and remote access
+
+#### Using HTTP Transport
+
+Start the server with HTTP transport:
+
+```bash
+# HTTP transport on default port 8000
+uvx mcp-jupyter --transport http
+
+# HTTP transport on custom port
+uvx mcp-jupyter --transport http --port 8090
+
+# HTTP transport in stateless mode (no session persistence)
+uvx mcp-jupyter --transport http --port 8090 --stateless-http
+```
+
 ### From Source
 
 For development or customization:
@@ -127,7 +149,9 @@ goose session --with-extension "uv run /path/to/mcp-jupyter/.venv/bin/mcp-jupyte
 
 ### Cursor
 
-Add to your MCP settings:
+#### Option 1: stdio Transport (Recommended for IDE)
+
+Add to your `.cursor/mcp.json`:
 
 ```json
 {
@@ -142,6 +166,30 @@ Add to your MCP settings:
   }
 }
 ```
+
+#### Option 2: HTTP Transport
+
+For HTTP transport, first start the server separately:
+
+```bash
+uvx mcp-jupyter --transport http --port 8090
+```
+
+Then configure Cursor's `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "jupyter-http": {
+      "url": "http://localhost:8090/mcp/"  // ⚠️ Trailing slash is REQUIRED
+    }
+  }
+}
+```
+
+:::warning Important
+The trailing slash (`/mcp/`) is **required** for Cursor to connect properly to the HTTP endpoint.
+:::
 
 ### Other MCP Clients
 
