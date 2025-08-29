@@ -82,6 +82,14 @@ MCP Jupyter supports two transport protocols:
 - **stdio** (default) - Standard input/output communication, ideal for IDE integration
 - **http** - Streamable HTTP transport with session management, ideal for web clients and remote access
 
+#### Use Cases for HTTP Transport
+
+- **Serverless deployments**: Host the MCP server in cloud environments (AWS Lambda, Google Cloud Functions, etc.)
+- **Remote access**: Connect to the server from different machines or networks
+- **Web integrations**: Build web-based AI assistants that connect to the MCP server
+- **Multi-user environments**: Deploy a central MCP server that multiple clients can connect to
+- **Stateless operations**: Use `--stateless-http` for environments where session persistence isn't needed or desired
+
 #### Using HTTP Transport
 
 Start the server with HTTP transport:

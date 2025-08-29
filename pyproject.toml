@@ -11,8 +11,6 @@ dependencies = [
     "jupyter-nbmodel-client>=0.14.0",
     "rich",
     "jupyter-kernel-client>=0.8.0",
-    "starlette>=0.27.0",
-    "uvicorn>=0.23.0",
     "pycrdt>=0.12.27",
 ]
 

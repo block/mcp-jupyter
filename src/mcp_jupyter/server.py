@@ -5,6 +5,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
@@ -1230,8 +1231,6 @@ def create_server(
 
 
 if __name__ == "__main__":
-    import sys
-
     # Check for transport argument
     transport = "stdio"  # default
     if len(sys.argv) > 1:

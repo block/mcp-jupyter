@@ -26,8 +26,14 @@ This MCP server supports multiple transport modes and can be added to client wit
 ### Transport Modes
 
 The server supports two transport protocols:
-- **stdio** (default) - Standard input/output communication
-- **http** - Streamable HTTP transport with session management
+- **stdio** (default) - Standard input/output communication, ideal for local IDE integrations
+- **http** - Streamable HTTP transport with session management, enabling serverless deployments and remote access
+
+#### Use Cases for HTTP Transport
+- **Serverless deployments**: Host the MCP server in cloud environments (AWS Lambda, Google Cloud Functions, etc.)
+- **Remote access**: Connect to the server from different machines or networks
+- **Web integrations**: Build web-based AI assistants that connect to the MCP server
+- **Stateless operations**: Use `--stateless-http` for environments where session persistence isn't needed
 
 To use a specific transport:
 ```bash

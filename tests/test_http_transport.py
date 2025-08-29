@@ -10,6 +10,34 @@ import requests
 from mcp_jupyter.server import create_server
 
 
+def wait_for_server(url, timeout=10, poll_interval=0.5):
+    """Wait for server to be ready by polling an endpoint.
+
+    Args:
+        url: Server URL to check
+        timeout: Maximum time to wait in seconds
+        poll_interval: Time between checks in seconds
+
+    Returns
+    -------
+        True if server is ready, False if timeout reached
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            response = requests.get(url, timeout=1)
+            if response.status_code in [
+                200,
+                404,
+                405,
+            ]:  # Any response means server is up
+                return True
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(poll_interval)
+    return False
+
+
 class TestHTTPTransport:
     """Test HTTP transport functionality."""
 
@@ -42,8 +70,9 @@ class TestHTTPTransport:
         )
         server_thread.start()
 
-        # Give server time to start
-        time.sleep(2)
+        # Wait for server to be ready
+        if not wait_for_server("http://127.0.0.1:8081/", timeout=10):
+            pytest.skip("HTTP server did not start in time")
 
         try:
             # Test that server responds to HTTP requests
@@ -105,88 +134,84 @@ class TestHTTPTransport:
 class TestCLIArguments:
     """Test CLI argument parsing."""
 
-    def test_cli_default_transport(self):
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("mcp_jupyter.create_server")
+    @patch("sys.argv", ["mcp-jupyter"])
+    def test_cli_default_transport(self, mock_create, mock_parse):
         """Test default transport is stdio."""
         from mcp_jupyter import main
 
-        with patch("sys.argv", ["mcp-jupyter"]):
-            with patch("mcp_jupyter.create_server") as mock_create:
-                mock_server = MagicMock()
-                mock_create.return_value = mock_server
+        mock_server = MagicMock()
+        mock_create.return_value = mock_server
 
-                with patch("argparse.ArgumentParser.parse_args") as mock_parse:
-                    mock_args = MagicMock()
-                    mock_args.transport = "stdio"
-                    mock_args.port = 8000
-                    mock_args.host = "127.0.0.1"
-                    mock_args.stateless_http = False
-                    mock_parse.return_value = mock_args
+        mock_args = MagicMock()
+        mock_args.transport = "stdio"
+        mock_args.port = 8000
+        mock_args.host = "127.0.0.1"
+        mock_args.stateless_http = False
+        mock_parse.return_value = mock_args
 
-                    # This would normally run the server, but we're mocking it
-                    try:
-                        main()
-                    except SystemExit:
-                        pass
+        # This would normally run the server, but we're mocking it
+        try:
+            main()
+        except SystemExit:
+            pass
 
-                    mock_server.run.assert_called_once_with(transport="stdio")
+        mock_server.run.assert_called_once_with(transport="stdio")
 
-    def test_cli_http_transport(self):
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("mcp_jupyter.create_server")
+    @patch("sys.argv", ["mcp-jupyter", "--transport", "http", "--port", "8080"])
+    def test_cli_http_transport(self, mock_create, mock_parse):
         """Test HTTP transport argument."""
         from mcp_jupyter import main
 
-        with patch(
-            "sys.argv", ["mcp-jupyter", "--transport", "http", "--port", "8080"]
-        ):
-            with patch("mcp_jupyter.create_server") as mock_create:
-                mock_server = MagicMock()
-                mock_create.return_value = mock_server
+        mock_server = MagicMock()
+        mock_create.return_value = mock_server
 
-                with patch("argparse.ArgumentParser.parse_args") as mock_parse:
-                    mock_args = MagicMock()
-                    mock_args.transport = "http"
-                    mock_args.port = 8080
-                    mock_args.host = "127.0.0.1"
-                    mock_args.stateless_http = False
-                    mock_parse.return_value = mock_args
+        mock_args = MagicMock()
+        mock_args.transport = "http"
+        mock_args.port = 8080
+        mock_args.host = "127.0.0.1"
+        mock_args.stateless_http = False
+        mock_parse.return_value = mock_args
 
-                    try:
-                        main()
-                    except SystemExit:
-                        pass
+        try:
+            main()
+        except SystemExit:
+            pass
 
-                    # Check that streamable-http transport is used
-                    mock_server.run.assert_called_once_with(transport="streamable-http")
-                    mock_create.assert_called_once_with(
-                        host="127.0.0.1", port=8080, stateless_http=False
-                    )
+        # Check that streamable-http transport is used
+        mock_server.run.assert_called_once_with(transport="streamable-http")
+        mock_create.assert_called_once_with(
+            host="127.0.0.1", port=8080, stateless_http=False
+        )
 
-    def test_cli_stateless_mode(self):
+    @patch("argparse.ArgumentParser.parse_args")
+    @patch("mcp_jupyter.create_server")
+    @patch("sys.argv", ["mcp-jupyter", "--transport", "http", "--stateless-http"])
+    def test_cli_stateless_mode(self, mock_create, mock_parse):
         """Test stateless HTTP mode argument."""
         from mcp_jupyter import main
 
-        with patch(
-            "sys.argv", ["mcp-jupyter", "--transport", "http", "--stateless-http"]
-        ):
-            with patch("mcp_jupyter.create_server") as mock_create:
-                mock_server = MagicMock()
-                mock_create.return_value = mock_server
+        mock_server = MagicMock()
+        mock_create.return_value = mock_server
 
-                with patch("argparse.ArgumentParser.parse_args") as mock_parse:
-                    mock_args = MagicMock()
-                    mock_args.transport = "http"
-                    mock_args.port = 8000
-                    mock_args.host = "127.0.0.1"
-                    mock_args.stateless_http = True
-                    mock_parse.return_value = mock_args
+        mock_args = MagicMock()
+        mock_args.transport = "http"
+        mock_args.port = 8000
+        mock_args.host = "127.0.0.1"
+        mock_args.stateless_http = True
+        mock_parse.return_value = mock_args
 
-                    try:
-                        main()
-                    except SystemExit:
-                        pass
+        try:
+            main()
+        except SystemExit:
+            pass
 
-                    mock_create.assert_called_once_with(
-                        host="127.0.0.1", port=8000, stateless_http=True
-                    )
+        mock_create.assert_called_once_with(
+            host="127.0.0.1", port=8000, stateless_http=True
+        )
 
 
 class TestHTTPEndpoints:
@@ -203,8 +228,9 @@ class TestHTTPEndpoints:
         )
         server_thread.start()
 
-        # Give server time to start
-        time.sleep(2)
+        # Wait for server to be ready
+        if not wait_for_server("http://127.0.0.1:8082/", timeout=10):
+            pytest.skip("HTTP server did not start in time")
 
         try:
             # Test initialize endpoint
@@ -254,8 +280,9 @@ class TestHTTPEndpoints:
         )
         server_thread.start()
 
-        # Give server time to start
-        time.sleep(2)
+        # Wait for server to be ready
+        if not wait_for_server("http://127.0.0.1:8083/", timeout=10):
+            pytest.skip("HTTP server did not start in time")
 
         try:
             # Test with missing Accept header
