@@ -90,7 +90,7 @@ Help the AI choose the right cell type and operation:
 ### 3. Handle Operation Errors
 
 Common AI mistakes and corrections:
-- ❌ AI says "edit_markdown" → ✅ Should be `operation="add_markdown"` or `operation="edit_code"`
+- ❌ AI says "edit_markdown" → ✅ Should be `operation="add_markdown"` or `operation="edit_markdown"`
 - ❌ Putting ASCII art in code cells → ✅ "Put that ASCII art in a markdown cell instead"
 - ❌ IndentationError on non-code content → ✅ "That content belongs in markdown, not code"
 
