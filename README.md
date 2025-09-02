@@ -21,7 +21,53 @@ This works with any client that supports MCP but will focus on using Goose for t
 You will need [UV](https://docs.astral.sh/uv/) is required to be installed. 
 
 ## Installation
-This MCP server uses stdio and can been added to client with the command `uvx mcp-jupyter`.  
+This MCP server supports multiple transport modes and can be added to client with the command `uvx mcp-jupyter`.
+
+### Transport Modes
+
+The server supports two transport protocols:
+- **stdio** (default) - Standard input/output communication, ideal for local IDE integrations
+- **http** - Streamable HTTP transport with session management, enabling serverless deployments and remote access
+
+#### Use Cases for HTTP Transport
+- **Serverless deployments**: Host the MCP server in cloud environments (AWS Lambda, Google Cloud Functions, etc.)
+- **Remote access**: Connect to the server from different machines or networks
+- **Web integrations**: Build web-based AI assistants that connect to the MCP server
+- **Stateless operations**: Use `--stateless-http` for environments where session persistence isn't needed
+
+To use a specific transport:
+```bash
+# Default stdio transport
+uvx mcp-jupyter
+
+# HTTP transport on custom port (stateful - maintains session)
+uvx mcp-jupyter --transport http --port 8080
+
+# HTTP transport in stateless mode (no session persistence)
+uvx mcp-jupyter --transport http --port 8080 --stateless-http
+```
+
+### Using HTTP Transport with Cursor
+
+To connect Cursor to an HTTP MCP server:
+
+1. Start the server separately:
+```bash
+uvx mcp-jupyter --transport http --port 8090
+```
+
+2. Configure Cursor's `.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "notebook-http": {
+      "url": "http://localhost:8090/mcp/"  // ⚠️ Trailing slash is REQUIRED
+    }
+  }
+}
+```
+
+**Important:** The trailing slash (`/mcp/`) is required for Cursor to connect properly to the HTTP endpoint.
 
 ## Usage
 
