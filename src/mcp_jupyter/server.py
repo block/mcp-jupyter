@@ -250,25 +250,11 @@ def notebook_client(notebook_path: str, server_url: str = None):
                 path=notebook_path,
             )
         )
-        # Use asyncio to run the async start method
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        loop.run_until_complete(notebook.start())
+        notebook.start()
         yield notebook
     finally:
         if notebook is not None:
-            # Use asyncio to run the async stop method
-            try:
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(notebook.stop())
-            except RuntimeError:
-                # Loop might be closed already
-                pass
+            notebook.stop()
 
 
 @mcp.tool()
