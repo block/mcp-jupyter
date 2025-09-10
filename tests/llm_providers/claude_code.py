@@ -57,7 +57,7 @@ Make sure to execute the cells so we can see the output."""
             if isinstance(message, AssistantMessage):
                 for i, block in enumerate(message.content):
                     if verbose:
-                        yield f"Block {i+1} type: {type(block).__name__}"
+                        yield f"Block {i + 1} type: {type(block).__name__}"
 
                     if isinstance(block, TextBlock):
                         self._responses.append(block.text)

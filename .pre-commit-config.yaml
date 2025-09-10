@@ -15,9 +15,8 @@ repos:
       - id: mixed-line-ending
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
+    rev: main
     hooks:
-      # Run the linter
       - id: ruff
         args: [--fix]
       # Run the formatter

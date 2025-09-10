@@ -421,15 +421,15 @@ def test_complex_code_execution(jupyter_server, test_notebook):
     # Add a cell with multiple print statements and a calculation - no need to specify server_url
     code = """
     import math
-    
+
     def calculate_circle_properties(radius):
         area = math.pi * radius ** 2
         circumference = 2 * math.pi * radius
         return area, circumference
-    
+
     radius = 5
     area, circumference = calculate_circle_properties(radius)
-    
+
     print(f"Radius: {radius}")
     print(f"Area: {area:.2f}")
     print(f"Circumference: {circumference:.2f}")
