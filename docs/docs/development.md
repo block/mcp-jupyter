@@ -35,6 +35,15 @@ uv run pytest --cov=mcp_jupyter tests/
 
 # Run specific test file
 uv run pytest tests/test_integration.py
+
+# Run integration tests only
+uv run pytest -m integration -v
+
+# Run LLM tool call generation tests
+uv run pytest -m llm -v
+
+# Run all tests except LLM tests
+uv run pytest -m "not llm" -v
 ```
 
 ## Using Development Version
@@ -82,7 +91,12 @@ mcp-jupyter/
 │       └── utils.py          # Utilities
 ├── tests/
 │   ├── test_integration.py   # Integration tests with real Jupyter server
-│   └── test_notebook_paths.py # Unit tests for notebook path handling
+│   ├── test_notebook_paths.py # Unit tests for notebook path handling
+│   ├── test_llm_tool_calls.py # LLM tool call generation tests
+│   └── llm_providers/        # LLM provider architecture
+│       ├── base.py           # Base provider interface
+│       ├── claude_code.py    # Claude Code provider
+│       └── config.py         # Provider configuration
 ├── demos/
 │   ├── demo.ipynb
 │   └── goose-demo.png
@@ -112,7 +126,8 @@ uv run ruff check --fix .
 
 1. **Unit Tests**: Test individual functions
 2. **Integration Tests**: Test with real Jupyter server
-3. **Manual Testing**: Test with your MCP client
+3. **LLM Tests**: Test how well LLMs generate MCP tool calls
+4. **Manual Testing**: Test with your MCP client
 
 Example test:
 
@@ -121,11 +136,78 @@ def test_notebook_creation():
     """Test creating a new notebook."""
     notebook_path = "test_notebook.ipynb"
     cells = ["import pandas as pd", "print('Hello, World!')"]
-    
+
     create_new_notebook(notebook_path, cells, server_url, token)
-    
+
     assert check_notebook_exists(notebook_path, server_url, token)
 ```
+
+### LLM Testing Infrastructure
+
+The project includes comprehensive testing for how well different LLMs can generate MCP tool calls from natural language prompts.
+
+#### Test Architecture
+
+- **Pluggable providers**: Easy to add new LLMs (Claude Code, Gemini, OpenAI, etc.)
+- **Standardized interface**: All providers implement the same `LLMProvider` interface
+- **Parameterized tests**: Same test validates all providers consistently
+- **Real-time monitoring**: Watch LLMs generate tool calls with verbose output
+
+#### Running LLM Tests
+
+```bash
+# Run LLM tool call generation tests
+uv run pytest -m llm -v
+
+# See LLM working in real-time (shows detailed progress)
+uv run pytest -m llm -v -s
+
+# Test specific provider
+uv run pytest -k "claude-code" -m llm -v
+```
+
+#### What Gets Tested
+
+Each LLM provider is validated on:
+
+1. **Understanding natural language prompts** about Jupyter tasks
+2. **Generating correct MCP tool calls** (`query_notebook`, `setup_notebook`, etc.)
+3. **Successfully executing the calls** to create notebooks with expected content
+4. **Error handling** when operations fail
+
+#### Test Environment Variables
+
+- `LLM_TEST_TIMEOUT`: Test timeout in seconds (default: 300)
+- `LLM_TEST_MAX_RETRIES`: Max retries for failed tests (default: 3)
+
+#### Adding New LLM Providers
+
+1. **Create provider class** in `tests/llm_providers/`:
+```python
+class MyLLMProvider(LLMProvider):
+    @property
+    def name(self) -> str:
+        return "my-llm"
+
+    async def send_task(self, prompt: str, server_url: str, verbose: bool = False):
+        # Implement LLM interaction
+        pass
+
+    async def get_final_response(self) -> LLMResponse:
+        # Return results with success metrics
+        pass
+```
+
+2. **Update configuration** in `tests/llm_providers/config.py`:
+```python
+if os.getenv("MY_LLM_API_KEY"):
+    from .my_llm import MyLLMProvider
+    providers.append(MyLLMProvider())
+```
+
+3. **Test automatically**: Provider included when environment variables are set
+
+This makes it easy to validate and compare how different LLMs perform at MCP tool call generation.
 
 ## Debugging
 

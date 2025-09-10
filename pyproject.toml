@@ -41,10 +41,13 @@ convention = "numpy"
 
 [dependency-groups]
 dev = [
+    "anyio>=4.0.0",
+    "claude-code-sdk>=0.0.21",
     "ipykernel>=6.29.5",
     "jupyter-collaboration>=3.1.0",
     "jupyterlab>=4.3.6",
     "pytest>=8.3.5",
+    "pytest-asyncio>=0.21.0",
     "pytest-order>=1.3.0",
     "pytest-xdist>=3.6.1",
 ]
@@ -52,6 +55,7 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "integration: marks tests as integration tests",
+    "llm: marks tests as LLM-generated tool call tests",
 ]
 filterwarnings = [
     "ignore:.*Jupyter is migrating.*:DeprecationWarning",

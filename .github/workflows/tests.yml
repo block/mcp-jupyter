@@ -24,7 +24,7 @@ jobs:
 
     - name: Test with Python ${{ matrix.python-version }}
       run: |
-        uv run  --python ${{ matrix.python-version }} pytest tests
+        uv run  --python ${{ matrix.python-version }} pytest tests -m "not llm"
 
     - name: Ruff
       run: |
