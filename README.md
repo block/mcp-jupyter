@@ -126,7 +126,7 @@ uv sync
 Using editable mode allows you to make changes to the server and only have you need to restart Goose, etc.
 `goose session --with-extension "uv run --directory $(pwd) mcp-jupyter"`
 
-## LLM Testing Infrastructure
+## LLM Evaluation
 
 This project includes a comprehensive testing infrastructure for validating how well different LLMs can generate MCP tool calls from natural language prompts.
 
@@ -154,8 +154,8 @@ uv run pytest -m llm -v -s
 # Run only integration tests (excludes LLM tests)
 uv run pytest -m integration -v
 
-# Run all tests except LLM tests
-uv run pytest -m "not llm" -v
+# Run all tests except LLM tests (default behavior)
+uv run pytest -v
 ```
 
 ### What the Tests Validate
@@ -166,18 +166,6 @@ Each LLM provider is tested on its ability to:
 2. **Generate correct MCP tool calls** (`query_notebook`, `setup_notebook`, `modify_notebook_cells`)
 3. **Successfully execute the calls** to create notebooks with expected content
 4. **Handle errors gracefully** when operations fail
-
-**Standard test task:**
-- Check if Jupyter server is running
-- Create a notebook called 'math_functions'
-- Add circle area and factorial functions
-- Edit cells with proper docstrings
-- Execute code and verify outputs
-
-### Environment Variables
-
-- `LLM_TEST_TIMEOUT`: Test timeout in seconds (default: 300)
-- `LLM_TEST_MAX_RETRIES`: Max retries for failed tests (default: 3)
 
 ### Adding New Providers
 

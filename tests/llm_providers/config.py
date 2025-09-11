@@ -32,8 +32,6 @@ def get_provider_config() -> Dict[str, Any]:
         Configuration dictionary
     """
     return {
-        "timeout_seconds": int(os.getenv("LLM_TEST_TIMEOUT", "300")),
-        "max_retries": int(os.getenv("LLM_TEST_MAX_RETRIES", "3")),
         "providers": {
             "claude-code": {
                 "enabled": True,

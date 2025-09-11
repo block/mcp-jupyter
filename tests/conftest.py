@@ -1,5 +1,6 @@
 """Shared test configuration with single warm server for session reuse."""
 
+import asyncio
 import os
 import shutil
 import signal
@@ -8,7 +9,6 @@ import time
 from pathlib import Path
 
 import pytest
-import requests
 
 # Fixtures for MCP Jupyter integration tests
 
@@ -18,6 +18,58 @@ TOKEN = "BLOCK"
 
 # LLM test constants
 LLM_SERVER_PORT = 10000
+
+
+async def _check_server_health(server_url: str, token: str) -> bool:
+    """Check if Jupyter server is healthy using asyncio."""
+    try:
+        # Use asyncio to make HTTP request without external dependencies
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("localhost", int(server_url.split(":")[-1])),
+            timeout=1.0,
+        )
+
+        # Send HTTP request
+        request = f"GET /api/sessions HTTP/1.1\r\nHost: localhost\r\nAuthorization: token {token}\r\nConnection: close\r\n\r\n"
+        writer.write(request.encode())
+        await writer.drain()
+
+        # Read response
+        response = await asyncio.wait_for(reader.read(1024), timeout=1.0)
+        writer.close()
+        await writer.wait_closed()
+
+        # Check if we got a 200 OK response
+        return b"200 OK" in response
+
+    except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+        return False
+
+
+async def _delete_notebook(server_url: str, notebook_name: str, token: str) -> bool:
+    """Delete a notebook using asyncio."""
+    try:
+        # Use asyncio to make HTTP DELETE request
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("localhost", int(server_url.split(":")[-1])),
+            timeout=2.0,
+        )
+
+        # Send HTTP DELETE request
+        request = f"DELETE /api/contents/{notebook_name} HTTP/1.1\r\nHost: localhost\r\nAuthorization: token {token}\r\nConnection: close\r\n\r\n"
+        writer.write(request.encode())
+        await writer.drain()
+
+        # Read response
+        response = await asyncio.wait_for(reader.read(1024), timeout=2.0)
+        writer.close()
+        await writer.wait_closed()
+
+        # Check if we got a successful response (2xx)
+        return b"200 " in response or b"204 " in response
+
+    except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+        return False
 
 
 def _start_jupyter_server(port: int, test_dir_name: str, server_type: str = ""):
@@ -85,18 +137,14 @@ def _start_jupyter_server(port: int, test_dir_name: str, server_type: str = ""):
 
     for attempt in range(max_retries):
         try:
-            # Use /api/sessions for faster response than /api/kernelspecs
-            response = requests.get(
-                f"{server_url}/api/sessions",
-                headers={"Authorization": f"token {TOKEN}"},
-                timeout=1,  # Shorter timeout for faster failure detection
-            )
-            if response.status_code == 200:
+            # Check server health using asyncio
+            is_healthy = asyncio.run(_check_server_health(server_url, TOKEN))
+            if is_healthy:
                 print(
                     f"{server_type}Jupyter server started successfully (attempt {attempt + 1})"
                 )
                 break
-        except (requests.ConnectionError, requests.Timeout):
+        except Exception:
             pass
         time.sleep(retry_interval)
         if attempt % 8 == 0:  # Print every 2 seconds
@@ -199,10 +247,7 @@ def test_notebook(jupyter_server):
 
     # Cleanup: delete the test notebook after test
     try:
-        response = requests.delete(
-            f"{jupyter_server}/api/contents/{notebook_name}.ipynb",
-            headers={"Authorization": f"token {TOKEN}"},
-        )
+        asyncio.run(_delete_notebook(jupyter_server, f"{notebook_name}.ipynb", TOKEN))
         # Reset notebook state after deletion
         try:
             from mcp_jupyter.server import NotebookState

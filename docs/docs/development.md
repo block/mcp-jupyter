@@ -142,7 +142,7 @@ def test_notebook_creation():
     assert check_notebook_exists(notebook_path, server_url, token)
 ```
 
-### LLM Testing Infrastructure
+### LLM Evaluation
 
 The project includes comprehensive testing for how well different LLMs can generate MCP tool calls from natural language prompts.
 
@@ -174,11 +174,6 @@ Each LLM provider is validated on:
 2. **Generating correct MCP tool calls** (`query_notebook`, `setup_notebook`, etc.)
 3. **Successfully executing the calls** to create notebooks with expected content
 4. **Error handling** when operations fail
-
-#### Test Environment Variables
-
-- `LLM_TEST_TIMEOUT`: Test timeout in seconds (default: 300)
-- `LLM_TEST_MAX_RETRIES`: Max retries for failed tests (default: 3)
 
 #### Adding New LLM Providers
 
