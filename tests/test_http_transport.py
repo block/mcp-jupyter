@@ -59,7 +59,6 @@ class TestHTTPTransport:
         assert server is not None
         assert server.name == "notebook"
 
-    @pytest.mark.integration
     def test_http_server_startup(self):
         """Test that HTTP server can start and respond to requests."""
         server = create_server(port=8081)
@@ -217,7 +216,6 @@ class TestCLIArguments:
 class TestHTTPEndpoints:
     """Test HTTP endpoint behavior."""
 
-    @pytest.mark.integration
     def test_http_initialize_endpoint(self):
         """Test the initialize endpoint with proper headers."""
         server = create_server(port=8082)
@@ -269,7 +267,6 @@ class TestHTTPEndpoints:
         except requests.exceptions.RequestException as e:
             pytest.skip(f"HTTP server did not respond properly: {e}")
 
-    @pytest.mark.integration
     def test_http_missing_accept_headers(self):
         """Test that server rejects requests without proper Accept headers."""
         server = create_server(port=8083)

@@ -18,7 +18,7 @@ Jupyter MCP Server allows you to use tools like [Goose](https://block.github.io/
 This works with any client that supports MCP but will focus on using Goose for the examples.
 
 ## Requirements
-You will need [UV](https://docs.astral.sh/uv/) is required to be installed. 
+You will need [UV](https://docs.astral.sh/uv/) is required to be installed.
 
 ## Installation
 This MCP server supports multiple transport modes and can be added to client with the command `uvx mcp-jupyter`.
@@ -76,7 +76,7 @@ The server expects that a server is already running on a port that is available 
 
 **Option 1: Using uv venv**
 ```bash
-# Create virtual environment  
+# Create virtual environment
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
@@ -103,7 +103,7 @@ uv run jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
 
 Here's a demonstration of the tool in action:
 
-![MCP Jupyter Demo](demos/goose-demo.png) 
+![MCP Jupyter Demo](demos/goose-demo.png)
 
 You can view the Generated notebook here: [View Demo Notebook](demos/demo.ipynb)
 
@@ -125,3 +125,80 @@ uv sync
 
 Using editable mode allows you to make changes to the server and only have you need to restart Goose, etc.
 `goose session --with-extension "uv run --directory $(pwd) mcp-jupyter"`
+
+## LLM Evaluation
+
+This project includes a comprehensive testing infrastructure for validating how well different LLMs can generate MCP tool calls from natural language prompts.
+
+### Test Architecture
+
+The LLM testing system uses a pluggable provider architecture:
+
+- **`LLMProvider`**: Abstract base class that all providers implement
+- **`LLMResponse`**: Standardized response format with success metrics and metadata
+- **Parameterized tests**: Same test runs against all available providers
+
+### Current Providers
+
+- **ClaudeCodeProvider**: Uses the Claude Code SDK (no API key required)
+
+### Running LLM Tests
+
+```bash
+# Run LLM tool call generation tests
+uv run pytest -m llm -v
+
+# See LLM working in real-time (shows detailed progress)
+uv run pytest -m llm -v -s
+
+# Run all tests except LLM tests (default behavior)
+uv run pytest -v
+```
+
+### What the Tests Validate
+
+Each LLM provider is tested on its ability to:
+
+1. **Understand natural language prompts** about Jupyter notebook tasks
+2. **Generate correct MCP tool calls** (`query_notebook`, `setup_notebook`, `modify_notebook_cells`)
+3. **Successfully execute the calls** to create notebooks with expected content
+4. **Handle errors gracefully** when operations fail
+
+### Adding New Providers
+
+To add a new LLM provider:
+
+1. **Implement the interface**:
+```python
+# tests/llm_providers/my_llm.py
+from .base import LLMProvider, LLMResponse
+
+class MyLLMProvider(LLMProvider):
+    @property
+    def name(self) -> str:
+        return "my-llm"
+
+    async def send_task(self, prompt: str, server_url: str, verbose: bool = False):
+        # Implement LLM interaction
+        pass
+
+    async def get_final_response(self) -> LLMResponse:
+        # Return standardized response
+        pass
+
+    async def cleanup(self):
+        # Clean up resources
+        pass
+```
+
+2. **Update configuration**:
+```python
+# tests/llm_providers/config.py - add to get_available_providers()
+if os.getenv("MY_LLM_API_KEY"):
+    from .my_llm import MyLLMProvider
+    providers.append(MyLLMProvider())
+```
+
+3. **Test automatically**: Your provider will be included in parameterized tests when its environment variables are set.
+
+This infrastructure makes it easy to validate and compare how different LLMs perform at generating MCP tool calls for Jupyter notebook automation.

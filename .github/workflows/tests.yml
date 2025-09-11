@@ -22,14 +22,14 @@ jobs:
       with:
         version: "latest"
 
-    - name: Test with Python ${{ matrix.python-version }}
-      run: |
-        uv run  --python ${{ matrix.python-version }} pytest tests
-
     - name: Ruff
       run: |
         uvx ruff check
         uvx ruff format --check
+
+    - name: Test with Python ${{ matrix.python-version }}
+      run: |
+        uv run  --python ${{ matrix.python-version }} pytest tests
 
     - name: Test build
       run: uv build

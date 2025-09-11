@@ -17,7 +17,6 @@ TOKEN = "BLOCK"
 # Test notebook fixture is now provided by conftest.py
 
 
-@pytest.mark.integration
 def test_notebook_creation(jupyter_server):
     """Test notebook creation functionality."""
     notebook_name = "test_creation"
@@ -33,7 +32,6 @@ def test_notebook_creation(jupyter_server):
     assert result["message"] == f"Notebook {notebook_name}.ipynb already exists"
 
 
-@pytest.mark.integration
 def test_add_code_cell(jupyter_server, test_notebook):
     """Test adding a code cell to a notebook."""
     # Add a simple code cell - test_notebook path is already relative to root
@@ -83,7 +81,6 @@ def test_add_code_cell(jupyter_server, test_notebook):
     assert inserted_cell["execution_count"] is None  # Not executed
 
 
-@pytest.mark.integration
 def test_add_markdown_cell(jupyter_server, test_notebook):
     """Test adding a markdown cell to a notebook."""
     # Add a markdown cell - test_notebook path is already relative to root
@@ -98,7 +95,6 @@ def test_add_markdown_cell(jupyter_server, test_notebook):
     assert not result["error"]
 
 
-@pytest.mark.integration
 def test_edit_markdown_cell(jupyter_server, test_notebook):
     """Test editing a markdown cell."""
     # First add a markdown cell to edit
@@ -146,7 +142,6 @@ def test_edit_markdown_cell(jupyter_server, test_notebook):
     assert updated_cell["cell_type"] == "markdown"
 
 
-@pytest.mark.integration
 def test_view_source(jupyter_server, test_notebook):
     """Test viewing notebook source."""
     # View all cells - test_notebook path is already relative to root
@@ -190,7 +185,6 @@ def test_view_source(jupyter_server, test_notebook):
             assert "def add(a, b):" in specific_cell["source"]
 
 
-@pytest.mark.integration
 def test_get_position_index(jupyter_server, test_notebook):
     """Test getting the position index of a cell."""
     # First, explicitly execute a cell to ensure we have at least one with an execution count
@@ -238,7 +232,6 @@ def test_get_position_index(jupyter_server, test_notebook):
         print("Cell has no execution_count, skipping that part of the test")
 
 
-@pytest.mark.integration
 def test_edit_code_cell(jupyter_server, test_notebook):
     """Test editing a code cell."""
     # First, view all cells to find the one we want to edit
@@ -324,7 +317,6 @@ def test_edit_code_cell(jupyter_server, test_notebook):
     assert "def divide(a, b):" in final_cell["source"]
 
 
-@pytest.mark.integration
 def test_execute_cell(jupyter_server, test_notebook):
     """Test executing a cell."""
     # First add a cell without executing it - no need to specify server_url
@@ -357,7 +349,6 @@ def test_execute_cell(jupyter_server, test_notebook):
     assert "5 squared is 25" in output_text
 
 
-@pytest.mark.integration
 def test_delete_cell(jupyter_server, test_notebook):
     """Test deleting a cell."""
     # Add a cell that we'll delete - no need to specify server_url
@@ -381,7 +372,6 @@ def test_delete_cell(jupyter_server, test_notebook):
     assert len(updated_cells) == len(all_cells) - 1
 
 
-@pytest.mark.integration
 def test_install_packages(jupyter_server, test_notebook):
     """Test installing packages."""
     # Install a small, common package - no need to specify server_url
@@ -407,7 +397,6 @@ def test_install_packages(jupyter_server, test_notebook):
     assert "successfully imported" in output_text
 
 
-@pytest.mark.integration
 def test_check_jupyter_server(jupyter_server):
     """Test that check_jupyter_server correctly verifies server connectivity."""
     # We still need to specify server_url here since this function doesn't use notebook_path
@@ -415,21 +404,20 @@ def test_check_jupyter_server(jupyter_server):
     assert result == "Jupyter server is running"
 
 
-@pytest.mark.integration
 def test_complex_code_execution(jupyter_server, test_notebook):
     """Test executing more complex code with multiple outputs."""
     # Add a cell with multiple print statements and a calculation - no need to specify server_url
     code = """
     import math
-    
+
     def calculate_circle_properties(radius):
         area = math.pi * radius ** 2
         circumference = 2 * math.pi * radius
         return area, circumference
-    
+
     radius = 5
     area, circumference = calculate_circle_properties(radius)
-    
+
     print(f"Radius: {radius}")
     print(f"Area: {area:.2f}")
     print(f"Circumference: {circumference:.2f}")
@@ -451,7 +439,6 @@ def test_complex_code_execution(jupyter_server, test_notebook):
     assert "Circumference: 31.42" in output_text
 
 
-@pytest.mark.integration
 def test_notebook_creation_with_new_directory(jupyter_server):
     """Test that creating a notebook in a non-existent directory works."""
     import requests
