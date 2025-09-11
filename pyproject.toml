@@ -54,7 +54,6 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-m 'not llm'"
 markers = [
-    "integration: marks tests as integration tests",
     "llm: marks tests as LLM-generated tool call tests",
 ]
 filterwarnings = [

@@ -5,7 +5,6 @@ import pytest
 from mcp_jupyter.server import query_notebook
 
 
-@pytest.mark.integration
 def test_check_server_without_notebook(jupyter_server):
     """Test that check_server works without a notebook path."""
     # check_server should work even with a non-existent notebook path
@@ -18,7 +17,6 @@ def test_check_server_without_notebook(jupyter_server):
     assert result == "Jupyter server is running"
 
 
-@pytest.mark.integration
 def test_list_sessions_without_notebook(jupyter_server):
     """Test that list_sessions works without accessing a specific notebook."""
     # list_sessions should work with any notebook path

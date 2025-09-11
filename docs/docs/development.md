@@ -36,14 +36,11 @@ uv run pytest --cov=mcp_jupyter tests/
 # Run specific test file
 uv run pytest tests/test_integration.py
 
-# Run integration tests only
-uv run pytest -m integration -v
-
 # Run LLM tool call generation tests
 uv run pytest -m llm -v
 
-# Run all tests except LLM tests
-uv run pytest -m "not llm" -v
+# Run all tests except LLM tests (default behavior)
+uv run pytest -v
 ```
 
 ## Using Development Version

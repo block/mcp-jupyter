@@ -151,9 +151,6 @@ uv run pytest -m llm -v
 # See LLM working in real-time (shows detailed progress)
 uv run pytest -m llm -v -s
 
-# Run only integration tests (excludes LLM tests)
-uv run pytest -m integration -v
-
 # Run all tests except LLM tests (default behavior)
 uv run pytest -v
 ```
