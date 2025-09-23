@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .notebook import list_notebook_sessions, prepare_notebook
-from .rtc_client import RTCClient, get_jupyter_notebook_websocket_url
+from .rest_client import NotebookClient
 from .state import NotebookState
 from .utils import (
     TOKEN,
@@ -208,7 +208,7 @@ def get_kernel(notebook_path: str, server_url: str = None) -> Optional[KernelCli
 def notebook_client(notebook_path: str, server_url: str = None):
     """Create and manage a Jupyter notebook client connection to the user-provided server.
 
-    This context manager handles creating, starting and stopping the notebook client connection.
+    This context manager handles creating, connecting and disconnecting the notebook client.
     It yields the notebook client that can be used to interact with the Jupyter notebook
     running on the user's server. It assumes the server is already running.
 
@@ -225,12 +225,12 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
     Yields
     ------
-        RTCClient: The notebook client instance that is connected to the Jupyter notebook.
+        NotebookClient: The notebook client instance that is connected to the Jupyter notebook.
 
     Raises
     ------
-        WebSocketClosedError: If the websocket connection fails
         ConnectionError: If unable to connect to the Jupyter server
+        requests.RequestException: If REST API calls fail
     """
     # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
@@ -243,18 +243,14 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
     notebook = None
     try:
-        notebook = RTCClient(
-            get_jupyter_notebook_websocket_url(
-                server_url=server_url,
-                token=TOKEN,
-                path=notebook_path,
-            )
+        notebook = NotebookClient(
+            server_url=server_url, notebook_path=notebook_path, token=TOKEN
         )
-        notebook.start()
+        notebook.connect()
         yield notebook
     finally:
         if notebook is not None:
-            notebook.stop()
+            notebook.disconnect()
 
 
 @mcp.tool()
@@ -791,17 +787,8 @@ def _modify_add_code_cell(
         # When we need to execute
         try:
             logger.info("Cell added successfully, now executing")
-            # Execute within the same notebook context using proper kernel initialization
-            kernel = get_kernel(notebook_path)
-            if kernel is None:
-                results = {
-                    "error": "No kernel available for execution",
-                    "message": "Cell was added but execution failed - no kernel",
-                }
-                return results
-
-            execution_result = notebook.execute_cell(position_index, kernel)
-            results.update(execution_result)
+            # Use the internal execution function which applies proper filtering
+            results = _execute_cell_internal(notebook_path, position_index)
             return results
         except Exception as e:
             import traceback

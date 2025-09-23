@@ -19,8 +19,6 @@ from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 from rich.console import Console
 from rich.logging import RichHandler
 
-from .rtc_client import RTCClient, get_jupyter_notebook_websocket_url
-
 TOKEN = os.getenv("TOKEN", "BLOCK")
 
 
