@@ -14,7 +14,6 @@ from typing import Optional, Union
 
 import requests
 from jupyter_kernel_client import KernelClient
-from jupyter_nbmodel_client import NbModelClient, get_jupyter_notebook_websocket_url
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
@@ -22,6 +21,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .notebook import list_notebook_sessions, prepare_notebook
+from .rtc_client import RTCClient, get_jupyter_notebook_websocket_url
 from .state import NotebookState
 from .utils import (
     TOKEN,
@@ -225,7 +225,7 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
     Yields
     ------
-        NbModelClient: The notebook client instance that is connected to the Jupyter notebook.
+        RTCClient: The notebook client instance that is connected to the Jupyter notebook.
 
     Raises
     ------
@@ -243,7 +243,7 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
     notebook = None
     try:
-        notebook = NbModelClient(
+        notebook = RTCClient(
             get_jupyter_notebook_websocket_url(
                 server_url=server_url,
                 token=TOKEN,
@@ -574,7 +574,7 @@ def _query_get_position_index(
     I think that would make goose less likely to confuse the two and lets us avoid the annoying
     formatting issues with square brackets/parentheses. But NBModelClient uses positional index to
     get/set cell values, so using ID here makes this clunkier.
-    jupyter_nbmodel_client.agent.BaseNbAgent.get_cell(cell_id)
+    # Note: cell_id based lookup not supported in RTC client
     could be helpful here, either directly or as a reference implementation.
     """
     if execution_count is None and cell_id is None:
@@ -791,14 +791,28 @@ def _modify_add_code_cell(
         # When we need to execute
         try:
             logger.info("Cell added successfully, now executing")
-            results = _execute_cell_internal(notebook_path, position_index)
+            # Execute within the same notebook context using proper kernel initialization
+            kernel = get_kernel(notebook_path)
+            if kernel is None:
+                results = {
+                    "error": "No kernel available for execution",
+                    "message": "Cell was added but execution failed - no kernel",
+                }
+                return results
+
+            execution_result = notebook.execute_cell(position_index, kernel)
+            results.update(execution_result)
             return results
         except Exception as e:
+            import traceback
+
             logger.error(f"Error during execution: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Return partial results if we have them
             results = {
                 "error": str(e),
                 "message": "Cell was added but execution failed",
+                "traceback": traceback.format_exc(),
             }
             return results
 
@@ -971,14 +985,8 @@ def _modify_delete_cell(notebook_path: str, position_index: int) -> dict:
 
     results = {"message": "", "error": ""}
     with notebook_client(notebook_path) as notebook:
-        # Found this interface as well but it fails currently, tries to call to_py() method
-        # on a string. Maybe jupyter_nbmodel_client will fix this eventually.
-        # For now we just copy the relevant portion of the delete operation (the part that fails
-        # doesn't appear to be critical).
-        # del notebook[position_index]
         try:
-            with notebook._lock:
-                notebook._doc.ycells.pop(position_index)
+            notebook.delete_cell(position_index)
             results["message"] = "Cell deleted"
         except Exception as e:
             results["error"] = str(e)

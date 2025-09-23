@@ -13,12 +13,13 @@ from typing import List, Optional, Union
 
 import requests
 from jupyter_kernel_client import KernelClient
-from jupyter_nbmodel_client import NbModelClient, get_jupyter_notebook_websocket_url
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 from rich.console import Console
 from rich.logging import RichHandler
+
+from .rtc_client import RTCClient, get_jupyter_notebook_websocket_url
 
 TOKEN = os.getenv("TOKEN", "BLOCK")
 

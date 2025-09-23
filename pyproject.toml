@@ -8,10 +8,11 @@ dependencies = [
     "beautifulsoup4>=4.12.3",
     "mcp[cli]>=1.13.1",
     "requests>=2.32.3",
-    "jupyter-nbmodel-client==0.6.0",
     "rich",
     "jupyter-kernel-client>=0.8.0",
-    "pycrdt>=0.8.0",
+    "pycrdt>=0.10.0",
+    "pycrdt-websocket>=0.15.0",
+    "jupyter-ydoc>=2.1.0",
 ]
 
 
