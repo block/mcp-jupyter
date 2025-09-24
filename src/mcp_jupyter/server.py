@@ -14,7 +14,6 @@ from typing import Optional, Union
 
 import requests
 from jupyter_kernel_client import KernelClient
-from jupyter_nbmodel_client import NbModelClient, get_jupyter_notebook_websocket_url
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
@@ -22,6 +21,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .notebook import list_notebook_sessions, prepare_notebook
+from .rest_client import NotebookClient
 from .state import NotebookState
 from .utils import (
     TOKEN,
@@ -208,7 +208,7 @@ def get_kernel(notebook_path: str, server_url: str = None) -> Optional[KernelCli
 def notebook_client(notebook_path: str, server_url: str = None):
     """Create and manage a Jupyter notebook client connection to the user-provided server.
 
-    This context manager handles creating, starting and stopping the notebook client connection.
+    This context manager handles creating, connecting and disconnecting the notebook client.
     It yields the notebook client that can be used to interact with the Jupyter notebook
     running on the user's server. It assumes the server is already running.
 
@@ -225,12 +225,12 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
     Yields
     ------
-        NbModelClient: The notebook client instance that is connected to the Jupyter notebook.
+        NotebookClient: The notebook client instance that is connected to the Jupyter notebook.
 
     Raises
     ------
-        WebSocketClosedError: If the websocket connection fails
         ConnectionError: If unable to connect to the Jupyter server
+        requests.RequestException: If REST API calls fail
     """
     # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
@@ -243,18 +243,14 @@ def notebook_client(notebook_path: str, server_url: str = None):
 
     notebook = None
     try:
-        notebook = NbModelClient(
-            get_jupyter_notebook_websocket_url(
-                server_url=server_url,
-                token=TOKEN,
-                path=notebook_path,
-            )
+        notebook = NotebookClient(
+            server_url=server_url, notebook_path=notebook_path, token=TOKEN
         )
-        notebook.start()
+        notebook.connect()
         yield notebook
     finally:
         if notebook is not None:
-            notebook.stop()
+            notebook.disconnect()
 
 
 @mcp.tool()
@@ -574,7 +570,7 @@ def _query_get_position_index(
     I think that would make goose less likely to confuse the two and lets us avoid the annoying
     formatting issues with square brackets/parentheses. But NBModelClient uses positional index to
     get/set cell values, so using ID here makes this clunkier.
-    jupyter_nbmodel_client.agent.BaseNbAgent.get_cell(cell_id)
+    # Note: cell_id based lookup not supported in RTC client
     could be helpful here, either directly or as a reference implementation.
     """
     if execution_count is None and cell_id is None:
@@ -791,14 +787,19 @@ def _modify_add_code_cell(
         # When we need to execute
         try:
             logger.info("Cell added successfully, now executing")
+            # Use the internal execution function which applies proper filtering
             results = _execute_cell_internal(notebook_path, position_index)
             return results
         except Exception as e:
+            import traceback
+
             logger.error(f"Error during execution: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Return partial results if we have them
             results = {
                 "error": str(e),
                 "message": "Cell was added but execution failed",
+                "traceback": traceback.format_exc(),
             }
             return results
 
@@ -971,14 +972,8 @@ def _modify_delete_cell(notebook_path: str, position_index: int) -> dict:
 
     results = {"message": "", "error": ""}
     with notebook_client(notebook_path) as notebook:
-        # Found this interface as well but it fails currently, tries to call to_py() method
-        # on a string. Maybe jupyter_nbmodel_client will fix this eventually.
-        # For now we just copy the relevant portion of the delete operation (the part that fails
-        # doesn't appear to be critical).
-        # del notebook[position_index]
         try:
-            with notebook._lock:
-                notebook._doc.ycells.pop(position_index)
+            notebook.delete_cell(position_index)
             results["message"] = "Cell deleted"
         except Exception as e:
             results["error"] = str(e)
