@@ -3,12 +3,14 @@
 This module provides a clean, reliable interface to Jupyter notebooks using
 only REST API calls. It avoids the complexity of RTC/WebSocket connections
 while still benefiting from server-side collaborative features.
+
+TODO: Add batch operations context manager for better performance with large notebooks.
+Could implement `with client.batch() as batch:` pattern to group operations.
 """
 
 import json
 import logging
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 import requests
 
@@ -39,20 +41,24 @@ class NotebookClient:
         self._server_url = server_url.rstrip("/")
         self._notebook_path = notebook_path
         self._token = token
-        self._connected = False
-        self._notebook_content: Optional[Dict[str, Any]] = None
 
     @property
     def connected(self) -> bool:
         """Check if client is connected."""
-        return self._connected
+        try:
+            response = requests.get(
+                f"{self._server_url}/api/contents",
+                headers=self._make_request_headers(),
+                timeout=10,
+            )
+            return response.status_code == 200
+        except:
+            return False
 
     @property
     def cells(self) -> List[Dict[str, Any]]:
         """Get all cells as a list of dictionaries."""
-        if not self._notebook_content:
-            return []
-        return self._notebook_content.get("cells", [])
+        return self._get_notebook_content().get("cells", [])
 
     @property
     def _doc(self):
@@ -82,6 +88,27 @@ class NotebookClient:
                 self.ycells = CellsWrapper(cells)
 
         return DocWrapper(self.cells)
+
+    def _get_notebook_content(self) -> Dict[str, Any]:
+        """Get current notebook content from server."""
+        try:
+            response = requests.get(
+                f"{self._server_url}/api/contents/{self._notebook_path}",
+                headers=self._make_request_headers(),
+                timeout=10,
+            )
+
+            if response.status_code == 404:
+                self._create_empty_notebook()
+                return self._get_notebook_content()
+            else:
+                response.raise_for_status()
+                data = response.json()
+                return data.get("content", {})
+
+        except Exception as e:
+            logger.error(f"Failed to get notebook content: {e}")
+            raise
 
     def _make_request_headers(self) -> Dict[str, str]:
         """Create headers for REST requests."""
@@ -141,19 +168,14 @@ class NotebookClient:
         return kernelspec, language_info
 
     def connect(self) -> None:
-        """Connect to the Jupyter server and load notebook content."""
+        """Connect to the Jupyter server."""
         try:
-            # Test server connection
             response = requests.get(
                 f"{self._server_url}/api/contents",
                 headers=self._make_request_headers(),
                 timeout=10,
             )
             response.raise_for_status()
-
-            # Load notebook content
-            self._load_notebook_content()
-            self._connected = True
             logger.info(f"✅ Connected to Jupyter server at {self._server_url}")
 
         except Exception as e:
@@ -162,35 +184,10 @@ class NotebookClient:
 
     def disconnect(self) -> None:
         """Disconnect from the server."""
-        self._connected = False
-        self._notebook_content = None
         logger.info("Disconnected from Jupyter server")
-
-    def _load_notebook_content(self) -> None:
-        """Load notebook content from the server."""
-        try:
-            response = requests.get(
-                f"{self._server_url}/api/contents/{self._notebook_path}",
-                headers=self._make_request_headers(),
-                timeout=10,
-            )
-
-            if response.status_code == 404:
-                # Notebook doesn't exist, create empty one
-                self._create_empty_notebook()
-            else:
-                response.raise_for_status()
-                data = response.json()
-                self._notebook_content = data.get("content", {})
-                logger.debug(f"Loaded notebook with {len(self.cells)} cells")
-
-        except Exception as e:
-            logger.error(f"Failed to load notebook content: {e}")
-            raise
 
     def _create_empty_notebook(self) -> None:
         """Create an empty notebook on the server."""
-        # Get default kernel spec from Jupyter server
         kernelspec, language_info = self._get_default_kernel_info()
 
         empty_notebook = {
@@ -212,16 +209,11 @@ class NotebookClient:
             timeout=10,
         )
         response.raise_for_status()
-
-        self._notebook_content = empty_notebook
         logger.info(f"Created empty notebook: {self._notebook_path}")
 
-    def _save_notebook(self) -> None:
-        """Save current notebook content to the server."""
-        if not self._notebook_content:
-            return
-
-        notebook_data = {"type": "notebook", "content": self._notebook_content}
+    def _save_notebook(self, notebook_content: Dict[str, Any]) -> None:
+        """Save notebook content to the server."""
+        notebook_data = {"type": "notebook", "content": notebook_content}
 
         response = requests.put(
             f"{self._server_url}/api/contents/{self._notebook_path}",
@@ -242,8 +234,7 @@ class NotebookClient:
         -------
             Position index where the cell was inserted
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
+        notebook_content = self._get_notebook_content()
 
         cell = {
             "cell_type": "code",
@@ -253,9 +244,9 @@ class NotebookClient:
             "execution_count": None,
         }
 
-        self._notebook_content["cells"].append(cell)
-        self._save_notebook()
-        return len(self._notebook_content["cells"]) - 1
+        notebook_content["cells"].append(cell)
+        self._save_notebook(notebook_content)
+        return len(notebook_content["cells"]) - 1
 
     def insert_code_cell(self, position: int, content: str) -> None:
         """Insert a code cell at a specific position.
@@ -264,8 +255,7 @@ class NotebookClient:
             position: Position to insert at (0-indexed)
             content: Source code for the cell
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
+        notebook_content = self._get_notebook_content()
 
         cell = {
             "cell_type": "code",
@@ -276,12 +266,12 @@ class NotebookClient:
         }
 
         # Ensure position is within bounds
-        max_position = len(self._notebook_content["cells"])
+        max_position = len(notebook_content["cells"])
         if position > max_position:
             position = max_position
 
-        self._notebook_content["cells"].insert(position, cell)
-        self._save_notebook()
+        notebook_content["cells"].insert(position, cell)
+        self._save_notebook(notebook_content)
 
     def add_markdown_cell(self, content: str) -> int:
         """Add a markdown cell at the end of the notebook.
@@ -293,14 +283,13 @@ class NotebookClient:
         -------
             Position index where the cell was inserted
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
+        notebook_content = self._get_notebook_content()
 
         cell = {"cell_type": "markdown", "source": content, "metadata": {}}
 
-        self._notebook_content["cells"].append(cell)
-        self._save_notebook()
-        return len(self._notebook_content["cells"]) - 1
+        notebook_content["cells"].append(cell)
+        self._save_notebook(notebook_content)
+        return len(notebook_content["cells"]) - 1
 
     def insert_markdown_cell(self, position: int, content: str) -> None:
         """Insert a markdown cell at a specific position.
@@ -309,18 +298,17 @@ class NotebookClient:
             position: Position to insert at (0-indexed)
             content: Markdown content for the cell
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
+        notebook_content = self._get_notebook_content()
 
         cell = {"cell_type": "markdown", "source": content, "metadata": {}}
 
         # Ensure position is within bounds
-        max_position = len(self._notebook_content["cells"])
+        max_position = len(notebook_content["cells"])
         if position > max_position:
             position = max_position
 
-        self._notebook_content["cells"].insert(position, cell)
-        self._save_notebook()
+        notebook_content["cells"].insert(position, cell)
+        self._save_notebook(notebook_content)
 
     def edit_cell(self, position: int, new_content: str) -> None:
         """Edit the content of a cell at the specified position.
@@ -329,15 +317,13 @@ class NotebookClient:
             position: Position of the cell to edit (0-indexed)
             new_content: New content for the cell
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
-
-        cells = self._notebook_content["cells"]
+        notebook_content = self._get_notebook_content()
+        cells = notebook_content["cells"]
         if position >= len(cells):
             raise IndexError(f"Cell index {position} out of range")
 
         cells[position]["source"] = new_content
-        self._save_notebook()
+        self._save_notebook(notebook_content)
 
     def delete_cell(self, position: int) -> None:
         """Delete a cell at the specified position.
@@ -345,15 +331,13 @@ class NotebookClient:
         Args:
             position: Position of the cell to delete (0-indexed)
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
-
-        cells = self._notebook_content["cells"]
+        notebook_content = self._get_notebook_content()
+        cells = notebook_content["cells"]
         if position >= len(cells):
             raise IndexError(f"Cell index {position} out of range")
 
         cells.pop(position)
-        self._save_notebook()
+        self._save_notebook(notebook_content)
 
     def execute_cell(self, position: int, kernel_client) -> Dict[str, Any]:
         """Execute a code cell using the provided kernel client.
@@ -366,10 +350,8 @@ class NotebookClient:
         -------
             Execution results containing outputs and execution count
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
-
-        cells = self._notebook_content["cells"]
+        notebook_content = self._get_notebook_content()
+        cells = notebook_content["cells"]
         if position >= len(cells):
             raise IndexError(f"Cell index {position} out of range")
 
@@ -383,7 +365,7 @@ class NotebookClient:
         # Update cell with results
         cell["outputs"] = result.get("outputs", [])
         cell["execution_count"] = result.get("execution_count")
-        self._save_notebook()
+        self._save_notebook(notebook_content)
 
         return result
 
@@ -397,10 +379,8 @@ class NotebookClient:
         -------
             Cell data as dictionary
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
-
-        cells = self._notebook_content["cells"]
+        notebook_content = self._get_notebook_content()
+        cells = notebook_content["cells"]
         if position >= len(cells):
             raise IndexError(f"Cell index {position} out of range")
 
@@ -408,8 +388,7 @@ class NotebookClient:
 
     def refresh(self) -> None:
         """Refresh notebook content from server to detect external changes."""
-        if self._connected:
-            self._load_notebook_content()
+        pass
 
     def __getitem__(self, position: int) -> Dict[str, Any]:
         """Get a cell by position using bracket notation.
@@ -430,13 +409,11 @@ class NotebookClient:
             position: Position of the cell (0-indexed)
             cell_data: New cell data dictionary
         """
-        if not self._notebook_content:
-            raise RuntimeError("Not connected to notebook")
-
-        cells = self._notebook_content["cells"]
+        notebook_content = self._get_notebook_content()
+        cells = notebook_content["cells"]
         if position >= len(cells):
             raise IndexError(f"Cell index {position} out of range")
 
         # Update the cell in place
         cells[position] = cell_data
-        self._save_notebook()
+        self._save_notebook(notebook_content)
