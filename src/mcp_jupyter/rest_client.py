@@ -22,7 +22,8 @@ class NotebookClient:
     This client uses only REST API calls to interact with Jupyter notebooks,
     avoiding the complexity and reliability issues of WebSocket/RTC connections.
     The server-side RTC infrastructure still provides collaboration benefits
-    for other clients.
+    for other clients.  It maintains the same interface as the
+    jupyter_nbmodel_client.NbModelClient RTC client.
     """
 
     def __init__(
@@ -89,6 +90,56 @@ class NotebookClient:
             headers["Authorization"] = f"token {self._token}"
         return headers
 
+    def _get_default_kernel_info(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """Get default kernel specification from the Jupyter server.
+
+        Returns
+        -------
+            tuple: (kernelspec, language_info) dictionaries
+
+        Raises
+        ------
+            requests.RequestException: If unable to get kernel specs from server
+        """
+        # Get available kernel specs
+        response = requests.get(
+            f"{self._server_url}/api/kernelspecs",
+            headers=self._make_request_headers(),
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        # Get default kernel name (usually 'python3' or similar)
+        default_kernel_name = data.get("default", "python3")
+        kernelspecs = data.get("kernelspecs", {})
+
+        if default_kernel_name not in kernelspecs:
+            raise RuntimeError(
+                f"Default kernel '{default_kernel_name}' not found in available kernelspecs"
+            )
+
+        spec = kernelspecs[default_kernel_name]["spec"]
+        kernelspec = {
+            "display_name": spec.get("display_name", "Python 3"),
+            "language": spec.get("language", "python"),
+            "name": default_kernel_name,
+        }
+
+        # Extract language info
+        language_info = {
+            "name": spec.get("language", "python"),
+        }
+
+        # Add version if available in metadata
+        metadata = spec.get("metadata", {})
+        if "interpreter" in metadata:
+            interpreter = metadata["interpreter"]
+            if "version" in interpreter:
+                language_info["version"] = interpreter["version"]
+
+        return kernelspec, language_info
+
     def connect(self) -> None:
         """Connect to the Jupyter server and load notebook content."""
         try:
@@ -139,15 +190,14 @@ class NotebookClient:
 
     def _create_empty_notebook(self) -> None:
         """Create an empty notebook on the server."""
+        # Get default kernel spec from Jupyter server
+        kernelspec, language_info = self._get_default_kernel_info()
+
         empty_notebook = {
             "cells": [],
             "metadata": {
-                "kernelspec": {
-                    "display_name": "Python 3",
-                    "language": "python",
-                    "name": "python3",
-                },
-                "language_info": {"name": "python", "version": "3.8"},
+                "kernelspec": kernelspec,
+                "language_info": language_info,
             },
             "nbformat": 4,
             "nbformat_minor": 5,

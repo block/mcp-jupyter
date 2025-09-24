@@ -2,6 +2,7 @@
 
 import pytest
 
+from mcp_jupyter.rest_client import NotebookClient
 from mcp_jupyter.server import query_notebook
 
 
@@ -27,3 +28,31 @@ def test_list_sessions_without_notebook(jupyter_server):
         server_url=jupyter_server,
     )
     assert isinstance(result, list)
+
+
+def test_get_default_kernel_info(jupyter_server):
+    """Test that kernel info can be retrieved from the server."""
+    # Create a client to test kernel info retrieval
+    client = NotebookClient(
+        server_url=jupyter_server,
+        notebook_path="test_kernel.ipynb",  # Doesn't need to exist for this test
+        token="BLOCK",
+    )
+
+    # Test getting kernel info
+    kernelspec, language_info = client._get_default_kernel_info()
+
+    # Verify kernelspec structure
+    assert isinstance(kernelspec, dict)
+    assert "display_name" in kernelspec
+    assert "language" in kernelspec
+    assert "name" in kernelspec
+
+    # Verify language_info structure
+    assert isinstance(language_info, dict)
+    assert "name" in language_info
+
+    # Verify content makes sense for a typical Jupyter setup
+    assert kernelspec["language"] == "python"
+    assert language_info["name"] == "python"
+    assert "python" in kernelspec["display_name"].lower()
