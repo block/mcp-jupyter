@@ -981,7 +981,7 @@ def _modify_delete_cell(notebook_path: str, position_index: int) -> dict:
 
 
 @mcp.tool()
-@NotebookState.refreshes_state
+@NotebookState.state_dependent
 def execute_notebook_code(
     notebook_path: str,
     execution_type: str,
