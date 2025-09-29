@@ -1,9 +1,11 @@
 """Test that check_server query type doesn't try to access notebooks."""
 
+from unittest.mock import Mock, patch
+
 import pytest
 
 from mcp_jupyter.rest_client import NotebookClient
-from mcp_jupyter.server import get_kernel, query_notebook
+from mcp_jupyter.server import query_notebook
 
 
 def test_check_server_without_notebook(jupyter_server):
@@ -58,18 +60,22 @@ def test_get_default_kernel_info(jupyter_server):
     assert "python" in kernelspec["display_name"].lower()
 
 
-def test_reconnect_interval_configured(jupyter_server, test_notebook):
-    """Test that kernel client is initialized with reconnect_interval."""
-    # Get the kernel
-    kernel = get_kernel(test_notebook)
-    assert kernel is not None
+def test_reconnect_interval_configured():
+    """Test that KernelClient is initialized with reconnect_interval=5."""
+    with patch("mcp_jupyter.server.KernelClient") as mock_kernel_client:
+        with patch("mcp_jupyter.server.get_kernel_id", return_value="mock-kernel-id"):
+            # Mock the kernel instance
+            mock_instance = Mock()
+            mock_instance.kernel_id = "mock-kernel-id"
+            mock_kernel_client.return_value = mock_instance
 
-    # Check that the underlying WebSocket client has reconnect_interval set
-    # The client is accessed via kernel._manager.client
-    ws_client = kernel._manager.client
+            # Import and call get_kernel
+            from mcp_jupyter.server import get_kernel
 
-    # Verify reconnect_interval is set to 5 (not the default 0)
-    assert hasattr(ws_client, "reconnect_interval")
-    assert ws_client.reconnect_interval == 5, (
-        f"Expected reconnect_interval=5, got {ws_client.reconnect_interval}"
-    )
+            get_kernel("test_notebook.ipynb", server_url="http://localhost:8888")
+
+            # Verify KernelClient was called with reconnect_interval in client_kwargs
+            mock_kernel_client.assert_called_once()
+            call_kwargs = mock_kernel_client.call_args.kwargs
+            assert "client_kwargs" in call_kwargs
+            assert call_kwargs["client_kwargs"] == {"reconnect_interval": 5}
