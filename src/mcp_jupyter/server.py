@@ -182,6 +182,9 @@ def get_kernel(notebook_path: str, server_url: str = None) -> Optional[KernelCli
             server_url=server_url,
             token=TOKEN,
             kernel_id=get_kernel_id(notebook_path, server_url),
+            client_kwargs={
+                "reconnect_interval": 5
+            },  # Auto-reconnect if WebSocket closes
         )
 
         new_kernel.start()
