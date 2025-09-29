@@ -3,7 +3,7 @@
 import pytest
 
 from mcp_jupyter.rest_client import NotebookClient
-from mcp_jupyter.server import query_notebook
+from mcp_jupyter.server import get_kernel, query_notebook
 
 
 def test_check_server_without_notebook(jupyter_server):
@@ -56,3 +56,20 @@ def test_get_default_kernel_info(jupyter_server):
     assert kernelspec["language"] == "python"
     assert language_info["name"] == "python"
     assert "python" in kernelspec["display_name"].lower()
+
+
+def test_reconnect_interval_configured(jupyter_server, test_notebook):
+    """Test that kernel client is initialized with reconnect_interval."""
+    # Get the kernel
+    kernel = get_kernel(test_notebook)
+    assert kernel is not None
+
+    # Check that the underlying WebSocket client has reconnect_interval set
+    # The client is accessed via kernel._manager.client
+    ws_client = kernel._manager.client
+
+    # Verify reconnect_interval is set to 5 (not the default 0)
+    assert hasattr(ws_client, "reconnect_interval")
+    assert ws_client.reconnect_interval == 5, (
+        f"Expected reconnect_interval=5, got {ws_client.reconnect_interval}"
+    )
