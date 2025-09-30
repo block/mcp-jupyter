@@ -1,5 +1,7 @@
 """Test that check_server query type doesn't try to access notebooks."""
 
+from unittest.mock import Mock, patch
+
 import pytest
 
 from mcp_jupyter.rest_client import NotebookClient
@@ -56,3 +58,24 @@ def test_get_default_kernel_info(jupyter_server):
     assert kernelspec["language"] == "python"
     assert language_info["name"] == "python"
     assert "python" in kernelspec["display_name"].lower()
+
+
+def test_reconnect_interval_configured():
+    """Test that KernelClient is initialized with reconnect_interval=5."""
+    with patch("mcp_jupyter.server.KernelClient") as mock_kernel_client:
+        with patch("mcp_jupyter.server.get_kernel_id", return_value="mock-kernel-id"):
+            # Mock the kernel instance
+            mock_instance = Mock()
+            mock_instance.kernel_id = "mock-kernel-id"
+            mock_kernel_client.return_value = mock_instance
+
+            # Import and call get_kernel
+            from mcp_jupyter.server import get_kernel
+
+            get_kernel("test_notebook.ipynb", server_url="http://localhost:8888")
+
+            # Verify KernelClient was called with reconnect_interval in client_kwargs
+            mock_kernel_client.assert_called_once()
+            call_kwargs = mock_kernel_client.call_args.kwargs
+            assert "client_kwargs" in call_kwargs
+            assert call_kwargs["client_kwargs"] == {"reconnect_interval": 5}

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+import mcp_jupyter.server
+
 # Fixtures for MCP Jupyter integration tests
 
 # Constants
@@ -210,6 +212,14 @@ def jupyter_server():
     )
 
     yield server_url
+
+    # Clean up any lingering kernel connections
+    try:
+        if mcp_jupyter.server.kernel is not None:
+            print("Cleaning up kernel connection...")
+            mcp_jupyter.server.kernel.stop()
+    except Exception as e:
+        print(f"Error cleaning up kernel: {e}")
 
     _cleanup_jupyter_server(server_process, test_notebooks_dir, "session ")
 
