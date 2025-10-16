@@ -74,32 +74,47 @@ uvx mcp-jupyter --transport http --port 8090
 ## Usage
 
 ### Start Jupyter
-The server expects that a server is already running on a port that is available to the client. If the environmental variable TOKEN is not set, it will default to "BLOCK". The server requires that jupyter-collaboration and ipykernel are installed.
+The server expects that a server is already running on a port that is available to the client. If the environmental variable TOKEN is not set, it will default to "BLOCK".
 
-**Option 1: Using uv venv**
+**Option 1: With Real-Time Collaboration (Recommended)**
+
+Real-time collaboration (`jupyter-collaboration`) enables automatic synchronization between the AI agent and your notebook interface. Changes made by the agent appear instantly in your browser.
+
 ```bash
-# Create virtual environment
+# Using uv venv
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install Jupyter dependencies
 uv pip install jupyterlab jupyter-collaboration ipykernel
-
-# Start Jupyter
 jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
-```
 
-**Option 2: Using uv project**
-```bash
-# Initialize project (if you don't have one)
+# OR using uv project
 uv init jupyter-workspace && cd jupyter-workspace
-
-# Install Jupyter dependencies
 uv add jupyterlab jupyter-collaboration ipykernel
-
-# Start Jupyter
 uv run jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
 ```
+
+**Option 2: Without Real-Time Collaboration**
+
+You can use MCP Jupyter without `jupyter-collaboration`, but you'll need to manually sync changes:
+
+```bash
+# Using uv venv
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install jupyterlab ipykernel
+jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
+
+# OR using uv project
+uv init jupyter-workspace && cd jupyter-workspace
+uv add jupyterlab ipykernel
+uv run jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
+```
+
+> **Important Workflow Differences Without RTC:**
+> - **After the agent makes changes**: Use the "Reload Notebook from Disk" command in JupyterLab to see the updates
+> - **After you edit in the notebook**: Click Save (Ctrl+S / Cmd+S) so the agent can see your changes
+>
+> With RTC enabled, these manual steps are not needed - changes sync automatically.
 
 ### Goose Usage
 

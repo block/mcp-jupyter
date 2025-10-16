@@ -9,7 +9,8 @@ Get up and running with MCP Jupyter in minutes.
 ## Requirements
 
 - [UV](https://docs.astral.sh/uv/) - Required for installation
-- JupyterLab with `jupyter-collaboration` and `ipykernel`
+- JupyterLab with `ipykernel` (required)
+- `jupyter-collaboration` extension (recommended for automatic sync)
 - An MCP-compatible client (e.g., [Goose](https://block.github.io/goose/), Cursor)
 
 ## Installation
@@ -30,34 +31,48 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 <Tabs>
-<TabItem value="venv" label="Using uv venv" default>
+<TabItem value="with-rtc" label="With Real-Time Collaboration (Recommended)" default>
 
 ```bash
-# Create virtual environment
+# Using uv venv
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install Jupyter dependencies
 uv pip install jupyterlab jupyter-collaboration ipykernel
-
-# Start Jupyter server
 jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
 ```
 
-</TabItem>
-<TabItem value="project" label="Using uv project">
-
 ```bash
-# Initialize a new project (if you don't have one)
+# Using uv project
 uv init jupyter-workspace
 cd jupyter-workspace
-
-# Add Jupyter dependencies
 uv add jupyterlab jupyter-collaboration ipykernel
-
-# Start Jupyter server
 uv run jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
 ```
+
+</TabItem>
+<TabItem value="without-rtc" label="Without Real-Time Collaboration">
+
+```bash
+# Using uv venv
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install jupyterlab ipykernel
+jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
+```
+
+```bash
+# Using uv project
+uv init jupyter-workspace
+cd jupyter-workspace
+uv add jupyterlab ipykernel
+uv run jupyter lab --port 8888 --IdentityProvider.token BLOCK --ip 0.0.0.0
+```
+
+:::caution Manual Sync Required
+Without `jupyter-collaboration`, you must manually sync changes:
+- **Agent makes changes** → Reload Notebook from Disk (File menu)
+- **You make edits** → Save (Ctrl+S / Cmd+S)
+:::
 
 </TabItem>
 </Tabs>
