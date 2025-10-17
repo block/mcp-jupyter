@@ -25,40 +25,68 @@ pip install uv
 
 ### 2. JupyterLab Setup
 
-MCP Jupyter requires a running JupyterLab server with specific extensions:
+MCP Jupyter requires a running JupyterLab server with `ipykernel`. We recommend also installing `jupyter-collaboration` for real-time synchronization.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 <Tabs>
-<TabItem value="venv" label="Using uv venv" default>
+<TabItem value="with-rtc" label="With Real-Time Collaboration (Recommended)" default>
+
+Real-time collaboration enables automatic synchronization between the AI agent and your notebook interface. Changes sync instantly without manual reloading.
 
 ```bash
-# Create virtual environment
+# Using uv venv
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install required packages
 uv pip install jupyterlab jupyter-collaboration ipykernel
 
 # Optional: Install additional packages
 uv pip install numpy pandas matplotlib
 ```
 
-</TabItem>
-<TabItem value="project" label="Using uv project">
-
 ```bash
-# Initialize a new project (if you don't have one)
+# Using uv project
 uv init jupyter-workspace
 cd jupyter-workspace
-
-# Add required packages
 uv add jupyterlab jupyter-collaboration ipykernel
 
 # Optional: Add additional packages
 uv add numpy pandas matplotlib
 ```
+
+</TabItem>
+<TabItem value="without-rtc" label="Without Real-Time Collaboration">
+
+You can use MCP Jupyter without `jupyter-collaboration`, but you'll need to manually sync changes between the agent and JupyterLab.
+
+```bash
+# Using uv venv
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install jupyterlab ipykernel
+
+# Optional: Install additional packages
+uv pip install numpy pandas matplotlib
+```
+
+```bash
+# Using uv project
+uv init jupyter-workspace
+cd jupyter-workspace
+uv add jupyterlab ipykernel
+
+# Optional: Add additional packages
+uv add numpy pandas matplotlib
+```
+
+:::warning Important Workflow Differences
+When running **without** `jupyter-collaboration`:
+- **After the agent makes changes**: Use JupyterLab's "Reload Notebook from Disk" command (File → Reload Notebook from Disk) to see the updates
+- **After you edit in the notebook**: Save your changes (Ctrl+S / Cmd+S) so the agent can see them
+
+With RTC enabled, these manual steps are **not needed** - changes sync automatically.
+:::
 
 </TabItem>
 </Tabs>
