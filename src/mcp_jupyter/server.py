@@ -81,7 +81,9 @@ def get_kernel_id(
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
     response = requests.get(
-        f"{server_url}/api/sessions", headers={"Authorization": f"token {TOKEN}"}
+        f"{server_url}/api/sessions",
+        headers={"Authorization": f"token {TOKEN}"},
+        timeout=10,
     )
     notebooks = response.json()
 
@@ -494,10 +496,16 @@ def _query_check_server(server_url: str) -> str:
     """Check if the user-provided Jupyter server is running and accessible."""
     try:
         response = requests.get(
-            f"{server_url}/api/sessions", headers={"Authorization": f"token {TOKEN}"}
+            f"{server_url}/api/sessions",
+            headers={"Authorization": f"token {TOKEN}"},
+            timeout=10,
         )
         response.raise_for_status()
         return "Jupyter server is running"
+    except requests.Timeout:
+        return "Jupyter server is not accessible (timeout)"
+    except requests.ConnectionError:
+        return "Jupyter server is not accessible (connection error)"
     except Exception:
         return "Jupyter server is not accessible"
 
