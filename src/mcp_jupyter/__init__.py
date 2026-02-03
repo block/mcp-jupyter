@@ -1,5 +1,7 @@
 import argparse
 import logging
+import signal
+import sys
 
 from .server import create_server
 
@@ -8,6 +10,14 @@ logger = logging.getLogger(__name__)
 
 def main():
     """MCP Jupyter: Control a Jupyter notebook from MCP."""
+
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     parser = argparse.ArgumentParser(
         description="Gives you the ability to control a Jupyter notebook from MCP."
     )
