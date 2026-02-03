@@ -264,6 +264,8 @@ def query_notebook(
     position_index: int = None,
     cell_id: str = None,
     server_url: str = None,
+    include_outputs: bool = True,
+    source_preview_length: int = 60,
 ) -> Union[dict, list, str, int]:
     """Query notebook information and metadata on the user-provided server.
 
@@ -287,6 +289,7 @@ def query_notebook(
                        relative to the Jupyter server root.
         query_type: Type of query to perform. Options:
             - 'view_source': View source code of notebook (single cell or all cells)
+            - 'list_cells': Get compact cell metadata (position, type, preview) without full content
             - 'check_server': Check if Jupyter server is running and accessible
             - 'list_sessions': List all notebook sessions on the server
             - 'get_position_index': Get the index of a code cell
@@ -304,11 +307,17 @@ def query_notebook(
             This is a unique identifier for each cell, visible in notebook metadata.
         server_url: Server URL to connect to. If not provided, uses the URL stored by setup_notebook,
                    or falls back to http://localhost:8888
+        include_outputs: (For view_source) If True (default), include cell outputs.
+            If False, strip all outputs to reduce token usage.
+        source_preview_length: (For list_cells) Number of characters to include in source preview.
+            Defaults to 60.
 
     Returns
     -------
         Union[dict, list, str, int]:
             - view_source: dict (single cell) or list[dict] (all cells) with cell contents/metadata
+            - list_cells: list[dict] with compact metadata (position_index, cell_type, source_preview,
+              source_len, execution_count, has_output)
             - check_server: str status message
             - list_sessions: list of notebook sessions
             - get_position_index: int positional index
@@ -317,6 +326,12 @@ def query_notebook(
     --------
         # View all cells in notebook
         query_notebook("my_notebook.ipynb", "view_source")
+
+        # View all cells without outputs (saves tokens)
+        query_notebook("my_notebook.ipynb", "view_source", include_outputs=False)
+
+        # Get compact cell listing (much smaller than view_source)
+        query_notebook("my_notebook.ipynb", "list_cells")
 
         # View cell by execution count (the [3] shown in Jupyter UI)
         query_notebook("my_notebook.ipynb", "view_source", execution_count=3)
@@ -337,9 +352,13 @@ def query_notebook(
     """
     if query_type == "view_source":
         result = _query_view_source(
-            notebook_path, execution_count, position_index, server_url
+            notebook_path, execution_count, position_index, server_url, include_outputs
         )
         # Update hash after viewing notebook content
+        NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
+        return result
+    elif query_type == "list_cells":
+        result = _query_list_cells(notebook_path, server_url, source_preview_length)
         NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
         return result
     elif query_type == "check_server":
@@ -355,7 +374,7 @@ def query_notebook(
         return result
     else:
         raise ValueError(
-            f"Invalid query_type: {query_type}. Must be one of: view_source, check_server, list_sessions, get_position_index"
+            f"Invalid query_type: {query_type}. Must be one of: view_source, list_cells, check_server, list_sessions, get_position_index"
         )
 
 
@@ -422,11 +441,62 @@ def _filter_cell_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list
         return filter_single_cell(cell_data)
 
 
+def _strip_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list[dict]]:
+    """Remove all outputs from cell data."""
+
+    def strip_single(cell: dict) -> dict:
+        if not isinstance(cell, dict):
+            return cell
+        result = cell.copy()
+        if result.get("cell_type") == "code":
+            result["outputs"] = []
+        return result
+
+    if isinstance(cell_data, list):
+        return [strip_single(c) for c in cell_data]
+    return strip_single(cell_data)
+
+
+def _query_list_cells(
+    notebook_path: str,
+    server_url: str = None,
+    source_preview_length: int = 60,
+) -> list[dict]:
+    """Return compact cell metadata without full content."""
+    if source_preview_length < 1:
+        source_preview_length = 60
+
+    notebook_path = _ensure_ipynb_extension(notebook_path)
+
+    with notebook_client(notebook_path, server_url) as notebook:
+        cells = []
+        for i, cell in enumerate(notebook._doc.ycells):
+            source = cell.get("source", "")
+            if isinstance(source, list):
+                source = "".join(source)
+
+            cell_info = {
+                "position_index": i,
+                "cell_type": cell.get("cell_type", "unknown"),
+                "source_preview": source[:source_preview_length].replace("\n", " "),
+                "source_len": len(source),
+            }
+
+            if cell.get("cell_type") == "code":
+                cell_info["execution_count"] = cell.get("execution_count")
+                cell_info["has_output"] = bool(cell.get("outputs"))
+
+            cells.append(cell_info)
+
+        return cells
+
+
 def _query_view_source(
     notebook_path: str,
     execution_count: int = None,
     position_index: int = None,
     server_url: str = None,
+    include_outputs: bool = True,
 ) -> Union[dict, list[dict]]:
     """View the source code of a Jupyter notebook (either single cell or all cells).
 
@@ -435,6 +505,13 @@ def _query_view_source(
     over time, e.g. if it executes or adds cells these numbers can change.
     Goose can pass in either *one* of the two arguments to view a single cell, or neither to view
     all cells. It must NOT pass in both.
+
+    Args:
+        notebook_path: Path to the notebook file.
+        execution_count: The execution count to look for.
+        position_index: The position index to look for.
+        server_url: Server URL to connect to.
+        include_outputs: If True (default), include cell outputs. If False, strip all outputs.
     """
     if execution_count is not None and position_index is not None:
         raise ValueError("Cannot provide both execution_count and position_index.")
@@ -451,6 +528,8 @@ def _query_view_source(
     with notebook_client(notebook_path, server_url) as notebook:
         if view_all:
             raw_cells = notebook._doc.ycells.to_py()
+            if not include_outputs:
+                raw_cells = _strip_outputs(raw_cells)
             return _filter_cell_outputs(raw_cells)
 
         if position_index is None:
@@ -487,6 +566,8 @@ def _query_view_source(
             position_index = position_indices.pop()
 
         raw_cell = notebook[position_index]
+        if not include_outputs:
+            raw_cell = _strip_outputs(raw_cell)
         return _filter_cell_outputs(raw_cell)
 
 
