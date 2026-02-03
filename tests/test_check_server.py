@@ -79,3 +79,23 @@ def test_reconnect_interval_configured():
             call_kwargs = mock_kernel_client.call_args.kwargs
             assert "client_kwargs" in call_kwargs
             assert call_kwargs["client_kwargs"] == {"reconnect_interval": 5}
+
+
+def test_check_server_timeout():
+    """Test that check_server returns descriptive message on timeout."""
+    import requests
+
+    with patch("mcp_jupyter.server.requests.get") as mock_get:
+        mock_get.side_effect = requests.Timeout()
+        result = query_notebook("nb", "check_server", server_url="http://localhost:8888")
+        assert result == "Jupyter server is not accessible (timeout)"
+
+
+def test_check_server_connection_error():
+    """Test that check_server returns descriptive message on connection error."""
+    import requests
+
+    with patch("mcp_jupyter.server.requests.get") as mock_get:
+        mock_get.side_effect = requests.ConnectionError()
+        result = query_notebook("nb", "check_server", server_url="http://localhost:8888")
+        assert result == "Jupyter server is not accessible (connection error)"
