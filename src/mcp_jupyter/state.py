@@ -96,6 +96,7 @@ class NotebookState:
         response = requests.get(
             f"{server_url}/api/contents/{notebook_path}",
             headers={"Authorization": f"token {TOKEN}"},
+            timeout=10,
         )
 
         response.raise_for_status()

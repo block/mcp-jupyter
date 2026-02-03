@@ -51,6 +51,7 @@ def check_notebook_exists(notebook_path: str, server_url: str, token: str) -> bo
         response = requests.get(
             f"{server_url}/api/contents/{notebook_path}",
             headers={"Authorization": f"token {token}"},
+            timeout=10,
         )
         return response.status_code == 200
     except requests.RequestException:
@@ -80,6 +81,7 @@ def create_new_notebook(notebook_path: str, server_url: str, token: str) -> None
             dir_check_response = requests.get(
                 f"{server_url}/api/contents/{directory_path}",
                 headers={"Authorization": f"token {token}"},
+                timeout=10,
             )
             # If directory doesn't exist (404), create it
             if dir_check_response.status_code == 404:
@@ -91,6 +93,7 @@ def create_new_notebook(notebook_path: str, server_url: str, token: str) -> None
                         "Content-Type": "application/json",
                     },
                     json={"type": "directory"},
+                    timeout=10,
                 )
                 dir_create_response.raise_for_status()  # Raise exception if directory creation fails
                 logger.info(f"Successfully created directory {directory_path}")
@@ -143,6 +146,7 @@ def create_new_notebook(notebook_path: str, server_url: str, token: str) -> None
                 "Content-Type": "application/json",
             },
             json=notebook_content,
+            timeout=10,
         )
 
         create_response.raise_for_status()
@@ -181,7 +185,9 @@ def list_notebook_sessions(server_url: str, token: str) -> List[Dict[str, Any]]:
     """
     try:
         response = requests.get(
-            f"{server_url}/api/sessions", headers={"Authorization": f"token {token}"}
+            f"{server_url}/api/sessions",
+            headers={"Authorization": f"token {token}"},
+            timeout=10,
         )
         response.raise_for_status()
         return response.json()
@@ -239,6 +245,7 @@ def start_notebook_kernel(
                 "Content-Type": "application/json",
             },
             json=session_data,
+            timeout=10,
         )
 
         kernel_response.raise_for_status()
@@ -278,6 +285,7 @@ def get_notebook_info(
         response = requests.get(
             f"{server_url}/api/contents/{notebook_path}",
             headers={"Authorization": f"token {token}"},
+            timeout=10,
         )
         response.raise_for_status()
         return response.json()
