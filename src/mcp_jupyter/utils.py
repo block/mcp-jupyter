@@ -1,25 +1,44 @@
-import hashlib
-import json
+import asyncio
 import logging
 import os
-import re
-import signal
-import subprocess
-import time
-from collections import defaultdict
-from contextlib import contextmanager
-from functools import wraps
-from typing import List, Optional, Union
+from typing import List
 
-import requests
-from jupyter_kernel_client import KernelClient
-from mcp.server.fastmcp import FastMCP
-from mcp.shared.exceptions import McpError
-from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
-from rich.console import Console
-from rich.logging import RichHandler
+import httpx
 
 TOKEN = os.getenv("TOKEN", "BLOCK")
+
+_http_client: httpx.AsyncClient | None = None
+_http_client_loop_id: int | None = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Get or create the shared async HTTP client.
+
+    Detects event loop changes (e.g. between test functions) and creates a
+    fresh client bound to the current loop when needed.
+    """
+    global _http_client, _http_client_loop_id
+    current_loop_id = None
+    try:
+        current_loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        pass
+
+    if _http_client is None or (
+        current_loop_id is not None and _http_client_loop_id != current_loop_id
+    ):
+        _http_client = httpx.AsyncClient(timeout=10.0)
+        _http_client_loop_id = current_loop_id
+    return _http_client
+
+
+async def close_http_client():
+    """Close the shared async HTTP client."""
+    global _http_client, _http_client_loop_id
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+        _http_client_loop_id = None
 
 
 def _ensure_ipynb_extension(notebook_path: str) -> str:

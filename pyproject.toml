@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "beautifulsoup4>=4.12.3",
     "mcp[cli]>=1.13.1",
+    "httpx>=0.28.0",
     "requests>=2.32.3",
     "rich",
     "jupyter-kernel-client>=0.8.0",
@@ -50,6 +51,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 addopts = "-m 'not llm'"
 markers = [
     "llm: marks tests as LLM-generated tool call tests",
