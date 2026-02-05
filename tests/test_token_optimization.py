@@ -5,9 +5,9 @@ import pytest
 from mcp_jupyter.server import query_notebook, _strip_outputs
 
 
-def test_list_cells_returns_compact_metadata(jupyter_server, test_notebook):
+async def test_list_cells_returns_compact_metadata(jupyter_server, test_notebook):
     """Test that list_cells returns compact cell metadata."""
-    result = query_notebook(
+    result = await query_notebook(
         test_notebook,
         "list_cells",
         server_url=jupyter_server,
@@ -24,9 +24,9 @@ def test_list_cells_returns_compact_metadata(jupyter_server, test_notebook):
         assert isinstance(cell["position_index"], int)
 
 
-def test_list_cells_code_cell_has_extra_fields(jupyter_server, test_notebook):
+async def test_list_cells_code_cell_has_extra_fields(jupyter_server, test_notebook):
     """Test that code cells in list_cells have execution_count and has_output."""
-    result = query_notebook(
+    result = await query_notebook(
         test_notebook,
         "list_cells",
         server_url=jupyter_server,
@@ -40,9 +40,9 @@ def test_list_cells_code_cell_has_extra_fields(jupyter_server, test_notebook):
         assert "has_output" in cell
 
 
-def test_list_cells_source_preview_length(jupyter_server, test_notebook):
+async def test_list_cells_source_preview_length(jupyter_server, test_notebook):
     """Test that source_preview_length parameter works."""
-    short_result = query_notebook(
+    short_result = await query_notebook(
         test_notebook,
         "list_cells",
         server_url=jupyter_server,
@@ -53,9 +53,9 @@ def test_list_cells_source_preview_length(jupyter_server, test_notebook):
         assert len(cell["source_preview"]) <= 10
 
 
-def test_include_outputs_false_strips_outputs(jupyter_server, test_notebook):
+async def test_include_outputs_false_strips_outputs(jupyter_server, test_notebook):
     """Test that include_outputs=False removes outputs from cells."""
-    result = query_notebook(
+    result = await query_notebook(
         test_notebook,
         "view_source",
         server_url=jupyter_server,

@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from mcp_jupyter.server import (
     execute_notebook_code,
@@ -17,25 +18,25 @@ TOKEN = "BLOCK"
 # Test notebook fixture is now provided by conftest.py
 
 
-def test_notebook_creation(jupyter_server):
+async def test_notebook_creation(jupyter_server):
     """Test notebook creation functionality."""
     notebook_name = "test_creation"
 
     # Create a new notebook - specify server_url on creation
-    result = setup_notebook(notebook_name, server_url=jupyter_server)
+    result = await setup_notebook(notebook_name, server_url=jupyter_server)
     assert result is not None
     assert "message" in result
     assert result["message"] == f"Notebook {notebook_name}.ipynb created"
 
     # Try creating the same notebook again - no need to specify server_url
-    result = setup_notebook(notebook_name)
+    result = await setup_notebook(notebook_name)
     assert result["message"] == f"Notebook {notebook_name}.ipynb already exists"
 
 
-def test_add_code_cell(jupyter_server, test_notebook):
+async def test_add_code_cell(jupyter_server, test_notebook):
     """Test adding a code cell to a notebook."""
     # Add a simple code cell - test_notebook path is already relative to root
-    result = modify_notebook_cells(
+    result = await modify_notebook_cells(
         test_notebook, "add_code", "x = 10\nprint(f'x = {x}')"
     )
 
@@ -55,11 +56,11 @@ def test_add_code_cell(jupyter_server, test_notebook):
 
     # Test adding cell at specific position (not at the bottom)
     # First get current cell count
-    all_cells_before = query_notebook(test_notebook, "view_source")
+    all_cells_before = await query_notebook(test_notebook, "view_source")
     initial_count = len(all_cells_before)
 
     # Add a cell at position 1 (second position)
-    positioned_result = modify_notebook_cells(
+    positioned_result = await modify_notebook_cells(
         test_notebook,
         "add_code",
         "y = 20\nprint(f'y = {y}')",
@@ -71,7 +72,7 @@ def test_add_code_cell(jupyter_server, test_notebook):
     assert positioned_result == {}
 
     # Check that the cell was inserted at the correct position
-    all_cells_after = query_notebook(test_notebook, "view_source")
+    all_cells_after = await query_notebook(test_notebook, "view_source")
     assert len(all_cells_after) == initial_count + 1
 
     # Verify the cell at position 1 contains our new content
@@ -81,10 +82,10 @@ def test_add_code_cell(jupyter_server, test_notebook):
     assert inserted_cell["execution_count"] is None  # Not executed
 
 
-def test_add_markdown_cell(jupyter_server, test_notebook):
+async def test_add_markdown_cell(jupyter_server, test_notebook):
     """Test adding a markdown cell to a notebook."""
     # Add a markdown cell - test_notebook path is already relative to root
-    result = modify_notebook_cells(
+    result = await modify_notebook_cells(
         test_notebook,
         "add_markdown",
         "# Test Markdown\nThis is a *markdown* cell with **formatting**.",
@@ -95,10 +96,10 @@ def test_add_markdown_cell(jupyter_server, test_notebook):
     assert not result["error"]
 
 
-def test_edit_markdown_cell(jupyter_server, test_notebook):
+async def test_edit_markdown_cell(jupyter_server, test_notebook):
     """Test editing a markdown cell."""
     # First add a markdown cell to edit
-    add_result = modify_notebook_cells(
+    add_result = await modify_notebook_cells(
         test_notebook,
         "add_markdown",
         cell_content="# Original Title\n\nOriginal content.",
@@ -106,7 +107,7 @@ def test_edit_markdown_cell(jupyter_server, test_notebook):
     assert add_result["message"] == "Markdown cell added"
 
     # Get all cells to find the markdown cell we just added
-    all_cells = query_notebook(test_notebook, "view_source")
+    all_cells = await query_notebook(test_notebook, "view_source")
 
     # Find the markdown cell by content
     markdown_position = None
@@ -122,7 +123,7 @@ def test_edit_markdown_cell(jupyter_server, test_notebook):
     )
 
     # Edit the markdown cell
-    edit_result = modify_notebook_cells(
+    edit_result = await modify_notebook_cells(
         test_notebook,
         "edit_markdown",
         cell_content="# Updated Title\n\nThis content has been updated!",
@@ -134,7 +135,7 @@ def test_edit_markdown_cell(jupyter_server, test_notebook):
     assert not edit_result["error"]
 
     # Verify the cell was actually changed
-    updated_cell = query_notebook(
+    updated_cell = await query_notebook(
         test_notebook, "view_source", position_index=markdown_position
     )
     assert "Updated Title" in updated_cell["source"]
@@ -142,10 +143,10 @@ def test_edit_markdown_cell(jupyter_server, test_notebook):
     assert updated_cell["cell_type"] == "markdown"
 
 
-def test_view_source(jupyter_server, test_notebook):
+async def test_view_source(jupyter_server, test_notebook):
     """Test viewing notebook source."""
     # View all cells - test_notebook path is already relative to root
-    all_cells = query_notebook(test_notebook, "view_source")
+    all_cells = await query_notebook(test_notebook, "view_source")
 
     # Verify we got a list of cells
     assert isinstance(all_cells, list)
@@ -163,7 +164,7 @@ def test_view_source(jupyter_server, test_notebook):
 
     # Now view just that specific cell by execution count (if it has one)
     if execution_count is not None:
-        specific_cell = query_notebook(
+        specific_cell = await query_notebook(
             test_notebook, "view_source", execution_count=int(execution_count)
         )
         assert isinstance(specific_cell, dict)
@@ -178,25 +179,25 @@ def test_view_source(jupyter_server, test_notebook):
                 break
 
         if position is not None:
-            specific_cell = query_notebook(
+            specific_cell = await query_notebook(
                 test_notebook, "view_source", position_index=position
             )
             assert isinstance(specific_cell, dict)
             assert "def add(a, b):" in specific_cell["source"]
 
 
-def test_get_position_index(jupyter_server, test_notebook):
+async def test_get_position_index(jupyter_server, test_notebook):
     """Test getting the position index of a cell."""
     # First, explicitly execute a cell to ensure we have at least one with an execution count
     # Add a cell we can easily identify
-    modify_notebook_cells(
+    await modify_notebook_cells(
         test_notebook,
         "add_code",
         "# Test cell for get_position_index\nprint('Hello from test cell')",
     )
 
     # Now get all cells
-    all_cells = query_notebook(test_notebook, "view_source")
+    all_cells = await query_notebook(test_notebook, "view_source")
 
     # Find our cell either by content or by execution count
     position_to_find = None
@@ -215,14 +216,14 @@ def test_get_position_index(jupyter_server, test_notebook):
 
     # Try to get position by content (using cell_id)
     if cell_id_to_find:
-        position_by_id = query_notebook(
+        position_by_id = await query_notebook(
             test_notebook, "get_position_index", cell_id=cell_id_to_find
         )
         assert position_by_id == position_to_find
 
     # If we have an execution count, test that path too
     if execution_count is not None:
-        position_by_exec = query_notebook(
+        position_by_exec = await query_notebook(
             test_notebook, "get_position_index", execution_count=int(execution_count)
         )
         assert position_by_exec == position_to_find
@@ -232,10 +233,10 @@ def test_get_position_index(jupyter_server, test_notebook):
         print("Cell has no execution_count, skipping that part of the test")
 
 
-def test_edit_code_cell(jupyter_server, test_notebook):
+async def test_edit_code_cell(jupyter_server, test_notebook):
     """Test editing a code cell."""
     # First, view all cells to find the one we want to edit
-    all_cells = query_notebook(test_notebook, "view_source")
+    all_cells = await query_notebook(test_notebook, "view_source")
 
     # Find the cell with the add function by content
     position_index = None
@@ -255,7 +256,7 @@ def test_edit_code_cell(jupyter_server, test_notebook):
 
     # Edit the cell
     modified_code = "def multiply(a, b):\n    return a * b\n\nprint(multiply(3, 4))"
-    result = modify_notebook_cells(
+    result = await modify_notebook_cells(
         test_notebook, "edit_code", modified_code, position_index
     )
 
@@ -273,7 +274,7 @@ def test_edit_code_cell(jupyter_server, test_notebook):
     assert "12" in output_text  # 3 * 4 = 12
 
     # Verify the cell was actually changed
-    updated_cell = query_notebook(
+    updated_cell = await query_notebook(
         test_notebook, "view_source", position_index=position_index
     )
     assert "def multiply(a, b):" in updated_cell["source"]
@@ -286,7 +287,7 @@ def test_edit_code_cell(jupyter_server, test_notebook):
     )
 
     # Step 1: Find position by execution_count
-    found_position = query_notebook(
+    found_position = await query_notebook(
         test_notebook, "get_position_index", execution_count=execution_count
     )
     assert found_position == position_index, (
@@ -295,7 +296,7 @@ def test_edit_code_cell(jupyter_server, test_notebook):
 
     # Step 2: Edit the cell using the found position
     modified_code2 = "def divide(a, b):\n    return a / b\n\nprint(divide(12, 3))"
-    result2 = modify_notebook_cells(
+    result2 = await modify_notebook_cells(
         test_notebook, "edit_code", modified_code2, found_position
     )
 
@@ -311,16 +312,16 @@ def test_edit_code_cell(jupyter_server, test_notebook):
     assert "4.0" in output_text2  # 12 / 3 = 4.0
 
     # Verify the cell content changed again
-    final_cell = query_notebook(
+    final_cell = await query_notebook(
         test_notebook, "view_source", position_index=position_index
     )
     assert "def divide(a, b):" in final_cell["source"]
 
 
-def test_execute_cell(jupyter_server, test_notebook):
+async def test_execute_cell(jupyter_server, test_notebook):
     """Test executing a cell."""
     # First add a cell without executing it - no need to specify server_url
-    result = modify_notebook_cells(
+    result = await modify_notebook_cells(
         test_notebook,
         "add_code",
         "result = 5 ** 2\nprint(f'5 squared is {result}')",
@@ -329,11 +330,11 @@ def test_execute_cell(jupyter_server, test_notebook):
 
     # When execute=False, we get position_index back, not a result dict
     # Get all cells to find the last one (which should be the one we just added)
-    all_cells = query_notebook(test_notebook, "view_source")
+    all_cells = await query_notebook(test_notebook, "view_source")
     position_index = len(all_cells) - 1
 
     # Now execute it - no need to specify server_url
-    result = execute_notebook_code(test_notebook, "execute_cell", position_index)
+    result = await execute_notebook_code(test_notebook, "execute_cell", position_index)
 
     # Verify execution results
     assert "execution_count" in result
@@ -349,17 +350,17 @@ def test_execute_cell(jupyter_server, test_notebook):
     assert "5 squared is 25" in output_text
 
 
-def test_delete_cell(jupyter_server, test_notebook):
+async def test_delete_cell(jupyter_server, test_notebook):
     """Test deleting a cell."""
     # Add a cell that we'll delete - no need to specify server_url
-    modify_notebook_cells(test_notebook, "add_code", "# This cell will be deleted")
+    await modify_notebook_cells(test_notebook, "add_code", "# This cell will be deleted")
 
     # Get all cells to find the last one (which should be the one we just added)
-    all_cells = query_notebook(test_notebook, "view_source")
+    all_cells = await query_notebook(test_notebook, "view_source")
     position_index = len(all_cells) - 1
 
     # Delete the cell - no need to specify server_url
-    result = modify_notebook_cells(
+    result = await modify_notebook_cells(
         test_notebook, "delete", position_index=position_index
     )
 
@@ -368,14 +369,14 @@ def test_delete_cell(jupyter_server, test_notebook):
     assert not result["error"]
 
     # Verify the cell was actually deleted
-    updated_cells = query_notebook(test_notebook, "view_source")
+    updated_cells = await query_notebook(test_notebook, "view_source")
     assert len(updated_cells) == len(all_cells) - 1
 
 
-def test_install_packages(jupyter_server, test_notebook):
+async def test_install_packages(jupyter_server, test_notebook):
     """Test installing packages."""
     # Install a small, common package - no need to specify server_url
-    result = execute_notebook_code(
+    result = await execute_notebook_code(
         test_notebook, "install_packages", package_names="pyyaml"
     )
 
@@ -384,7 +385,7 @@ def test_install_packages(jupyter_server, test_notebook):
     assert "pyyaml" in result
 
     # Verify we can import the package - no need to specify server_url
-    import_result = modify_notebook_cells(
+    import_result = await modify_notebook_cells(
         test_notebook, "add_code", "import yaml\nprint('PyYAML successfully imported')"
     )
 
@@ -397,16 +398,16 @@ def test_install_packages(jupyter_server, test_notebook):
     assert "successfully imported" in output_text
 
 
-def test_check_jupyter_server(jupyter_server):
+async def test_check_jupyter_server(jupyter_server):
     """Test that check_jupyter_server correctly verifies server connectivity."""
     # We still need to specify server_url here since this function doesn't use notebook_path
-    result = query_notebook("", "check_server", server_url=jupyter_server)
+    result = await query_notebook("", "check_server", server_url=jupyter_server)
     assert result == "Jupyter server is running"
 
 
-def test_complex_code_execution(jupyter_server, test_notebook):
+async def test_complex_code_execution(jupyter_server, test_notebook):
     """Test executing more complex code with multiple outputs."""
-    # Add a cell with multiple print statements and a calculation - no need to specify server_url
+    # Add a cell with multiple print statements and a calculation
     code = """
     import math
 
@@ -423,7 +424,7 @@ def test_complex_code_execution(jupyter_server, test_notebook):
     print(f"Circumference: {circumference:.2f}")
     """
 
-    result = modify_notebook_cells(test_notebook, "add_code", code)
+    result = await modify_notebook_cells(test_notebook, "add_code", code)
 
     # Verify execution results
     assert result["status"] == "ok"
@@ -439,17 +440,15 @@ def test_complex_code_execution(jupyter_server, test_notebook):
     assert "Circumference: 31.42" in output_text
 
 
-def test_notebook_creation_with_new_directory(jupyter_server):
+async def test_notebook_creation_with_new_directory(jupyter_server):
     """Test that creating a notebook in a non-existent directory works."""
-    import requests
-
     dir_name = "new_dir_integration"
     notebook_base_name = "my_subdir_notebook"
     # Path relative to the server root (where jupyter lab was started)
     relative_notebook_path = f"{dir_name}/{notebook_base_name}"
 
     # 1. Attempt to create the notebook (this should also create the directory)
-    creation_result = setup_notebook(relative_notebook_path, server_url=jupyter_server)
+    creation_result = await setup_notebook(relative_notebook_path, server_url=jupyter_server)
     assert "message" in creation_result
     assert "created" in creation_result["message"]  # Check it was created
 

@@ -1,18 +1,11 @@
-import hashlib
-import json
+import functools
 import logging
-import os
-import re
-import signal
-import subprocess
 import sys
-import time
-from collections import defaultdict
-from contextlib import contextmanager
-from functools import wraps
+from contextlib import asynccontextmanager
 from typing import Optional, Union
 
-import requests
+import anyio
+import httpx
 from jupyter_kernel_client import KernelClient
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
@@ -28,12 +21,11 @@ from .utils import (
     _ensure_ipynb_extension,
     extract_output,
     filter_image_outputs,
+    get_http_client,
 )
 
-# Initialize FastMCP server with default settings
-# This ensures tools are available when module is imported
+# Initialize FastMCP server
 mcp = FastMCP("notebook")
-
 
 handlers = []
 handlers.append(RichHandler(console=Console(stderr=True), rich_tracebacks=True))
@@ -45,49 +37,44 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Initialize kernel as None instead of connecting immediately
-kernel: Optional[KernelClient] = None
-# Add a dictionary to track kernel server URLs
-kernel_server_urls = {}
+# ── Per-notebook kernel registry (replaces global singleton) ──────────────────
+
+_kernel_registry: dict[str, KernelClient] = {}
+_kernel_meta: dict[str, str] = {}  # notebook_path → server_url
+
+# ── Per-notebook locks ────────────────────────────────────────────────────────
+
+_kernel_locks: dict[str, anyio.Lock] = {}
+_registry_lock: Optional[anyio.Lock] = None
 
 
-def get_kernel_id(
+async def _get_notebook_lock(path: str) -> anyio.Lock:
+    """Get or create a per-notebook lock. Uses a bootstrap lock for TOCTOU safety."""
+    global _registry_lock
+    if _registry_lock is None:
+        _registry_lock = anyio.Lock()
+    async with _registry_lock:
+        if path not in _kernel_locks:
+            _kernel_locks[path] = anyio.Lock()
+        return _kernel_locks[path]
+
+
+# ── Kernel management ─────────────────────────────────────────────────────────
+
+
+async def get_kernel_id(
     notebook_path: str, server_url: str = "http://localhost:8888"
 ) -> Optional[str]:
-    """Get the kernel ID for the notebook from the user-provided Jupyter server.
-
-    This ensures that the kernel used matches the state of the notebook
-    as seen by the user on their running server.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        server_url: The server URL to use. Defaults to http://localhost:8888.
-
-
-    Returns
-    -------
-        Optional[str]:
-            - The kernel ID if found
-            - None if no kernel is found but other notebooks exist
-            - Will raise exception if no notebooks are running
-
-    Raises
-    ------
-        McpError: If no active notebook sessions are found
-        RequestException: If unable to connect to Jupyter server
-    """
-    # Ensure the notebook path has the .ipynb extension
+    """Get the kernel ID for the notebook from the Jupyter server."""
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    response = requests.get(
+    client = get_http_client()
+    response = await client.get(
         f"{server_url}/api/sessions",
         headers={"Authorization": f"token {TOKEN}"},
-        timeout=10,
     )
     notebooks = response.json()
 
-    # First, try to find kernel for the specified notebook
     kernel_ids = [
         notebook["kernel"]["id"]
         for notebook in notebooks
@@ -97,7 +84,6 @@ def get_kernel_id(
     if len(kernel_ids) == 1:
         return kernel_ids[0]
 
-    # If not found, use the first available kernel and update notebook_path
     if notebooks:
         first_notebook = notebooks[0]
         first_notebook_path = first_notebook["path"]
@@ -106,160 +92,115 @@ def get_kernel_id(
         logger.info(
             f"No kernel found for {notebook_path}, using notebook {first_notebook_path} instead"
         )
-        logger.info(f"Using notebook path: {first_notebook_path}")
-
         return first_kernel_id
 
-    # If no notebooks are running at all
     raise McpError(
         ErrorData(
             code=INTERNAL_ERROR,
-            message=f"Failed to resolve kernel ID. No active notebook sessions found. Please open a notebook in Jupyter.",
+            message="Failed to resolve kernel ID. No active notebook sessions found. "
+            "Please open a notebook in Jupyter.",
         )
     )
 
 
-def get_kernel(notebook_path: str, server_url: str = None) -> Optional[KernelClient]:
-    """Get or initialize the kernel client connection to the user-provided server.
+async def get_kernel(
+    notebook_path: str, server_url: str = None
+) -> KernelClient:
+    """Get or create a kernel client for a specific notebook.
 
-    Connects to an existing kernel associated with the notebook on the specified server.
-    It assumes the Jupyter server is already running and accessible.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        server_url: The server URL to use. Defaults to None, which will use the URL stored
-                   for this notebook if available, otherwise http://localhost:8888.
-
-    Returns
-    -------
-        Optional[KernelClient]:
-            - Existing kernel client if already initialized
-            - New kernel client if successfully initialized
-            - None if initialization fails
-
-    Raises
-    ------
-        McpError: If the kernel client can't be initialized
-        McpError: If there's an error connecting to the Jupyter server
+    Each notebook gets its own KernelClient, stored in _kernel_registry.
+    A per-notebook lock serializes kernel creation.
     """
-    global kernel, kernel_server_urls
-
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    # If server_url is not provided, use the stored one for this notebook
     if server_url is None:
         server_url = NotebookState.get_server_url(notebook_path)
 
-    # Log server URL to confirm it's being passed correctly
-    logger.info(f"Getting kernel with server_url={server_url}")
+    logger.info(f"Getting kernel for {notebook_path} with server_url={server_url}")
 
-    # If kernel is already initialized, check if it's using the correct server_url
-    if kernel is not None:
-        # Use the kernel ID as a key in our dictionary
-        kernel_id = kernel.kernel_id if hasattr(kernel, "kernel_id") else id(kernel)
-        current_server_url = kernel_server_urls.get(kernel_id, "http://localhost:8888")
-
-        # If server_url has changed, we need to create a new kernel
-        if current_server_url != server_url:
+    lock = await _get_notebook_lock(notebook_path)
+    async with lock:
+        # Check if kernel exists and server_url matches
+        if notebook_path in _kernel_registry:
+            current_url = _kernel_meta.get(notebook_path, "http://localhost:8888")
+            if current_url == server_url:
+                return _kernel_registry[notebook_path]
+            # Server URL changed — stop old kernel
             logger.info(
-                f"Server URL changed from {current_server_url} to {server_url}, resetting kernel"
+                f"Server URL changed from {current_url} to {server_url} "
+                f"for {notebook_path}, resetting kernel"
             )
+            old_kernel = _kernel_registry.pop(notebook_path)
+            _kernel_meta.pop(notebook_path, None)
             try:
-                kernel.stop()  # Properly close the previous kernel
+                await anyio.to_thread.run_sync(old_kernel.stop)
             except Exception as e:
-                logger.warning(f"Error stopping kernel: {e}")
-            kernel = None
-            # Remove the old entry from our dictionary
-            if kernel_id in kernel_server_urls:
-                del kernel_server_urls[kernel_id]
-        else:
-            return kernel
+                logger.warning(f"Error stopping kernel for {notebook_path}: {e}")
 
-    # Initialize the kernel
-    try:
-        logger.info(f"Initializing kernel client with server_url={server_url}")
-        new_kernel = KernelClient(
-            server_url=server_url,
-            token=TOKEN,
-            kernel_id=get_kernel_id(notebook_path, server_url),
-            client_kwargs={
-                "reconnect_interval": 5
-            },  # Auto-reconnect if WebSocket closes
-        )
-
-        new_kernel.start()
-        kernel = new_kernel
-
-        # Store the server_url in our dictionary using kernel ID as key
-        kernel_id = (
-            new_kernel.kernel_id if hasattr(new_kernel, "kernel_id") else id(new_kernel)
-        )
-        kernel_server_urls[kernel_id] = server_url
-
-        return kernel
-    except Exception as e:
-        logger.warning(f"Failed to initialize kernel client: {e}")
-        raise McpError(
-            ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Could not connect to Jupyter notebook server at {server_url}: {e}",
+        # Create new kernel
+        try:
+            logger.info(f"Initializing kernel client for {notebook_path} at {server_url}")
+            kernel_id = await get_kernel_id(notebook_path, server_url)
+            new_kernel = KernelClient(
+                server_url=server_url,
+                token=TOKEN,
+                kernel_id=kernel_id,
+                client_kwargs={"reconnect_interval": 5},
             )
-        )
+            await anyio.to_thread.run_sync(new_kernel.start)
+
+            _kernel_registry[notebook_path] = new_kernel
+            _kernel_meta[notebook_path] = server_url
+            return new_kernel
+        except Exception as e:
+            logger.warning(f"Failed to initialize kernel client: {e}")
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Could not connect to Jupyter notebook server at {server_url}: {e}",
+                )
+            )
 
 
-@contextmanager
-def notebook_client(notebook_path: str, server_url: str = None):
-    """Create and manage a Jupyter notebook client connection to the user-provided server.
+async def cleanup_all_kernels():
+    """Stop all kernel clients. Call on server shutdown."""
+    for path, kernel in list(_kernel_registry.items()):
+        try:
+            await anyio.to_thread.run_sync(kernel.stop)
+        except Exception as e:
+            logger.warning(f"Error stopping kernel for {path}: {e}")
+    _kernel_registry.clear()
+    _kernel_meta.clear()
 
-    This context manager handles creating, connecting and disconnecting the notebook client.
-    It yields the notebook client that can be used to interact with the Jupyter notebook
-    running on the user's server. It assumes the server is already running.
 
-    Important note about paths:
-    --------------------------
-    The notebook_path parameter must be relative to the Jupyter server root directory,
-    not an absolute path on the local filesystem.
+# ── Notebook client context manager ──────────────────────────────────────────
 
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        server_url: The server URL to use. Defaults to None, which will use the URL stored
-                   for this notebook if available, otherwise http://localhost:8888.
 
-    Yields
-    ------
-        NotebookClient: The notebook client instance that is connected to the Jupyter notebook.
-
-    Raises
-    ------
-        ConnectionError: If unable to connect to the Jupyter server
-        requests.RequestException: If REST API calls fail
-    """
-    # Ensure the notebook path has the .ipynb extension
+@asynccontextmanager
+async def notebook_client(notebook_path: str, server_url: str = None):
+    """Async context manager for a NotebookClient connection."""
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    # If server_url is not provided, use the stored one for this notebook
     if server_url is None:
         server_url = NotebookState.get_server_url(notebook_path)
 
     logger.info(f"Creating notebook client with server_url={server_url}")
 
-    notebook = None
+    notebook = NotebookClient(
+        server_url=server_url, notebook_path=notebook_path, token=TOKEN
+    )
     try:
-        notebook = NotebookClient(
-            server_url=server_url, notebook_path=notebook_path, token=TOKEN
-        )
-        notebook.connect()
+        await notebook.connect()
         yield notebook
     finally:
-        if notebook is not None:
-            notebook.disconnect()
+        await notebook.disconnect()
+
+
+# ── Tool: query_notebook ─────────────────────────────────────────────────────
 
 
 @mcp.tool()
-def query_notebook(
+async def query_notebook(
     notebook_path: str,
     query_type: str,
     execution_count: int = None,
@@ -269,7 +210,7 @@ def query_notebook(
     include_outputs: bool = True,
     source_preview_length: int = 60,
 ) -> Union[dict, list, str, int]:
-    """Query notebook information and metadata on the user-provided server.
+    r"""Query notebook information and metadata on the user-provided server.
 
     This consolidates all read-only operations into a single tool following MCP best practices.
 
@@ -353,52 +294,49 @@ def query_notebook(
         McpError: If there's an error connecting to the Jupyter server
     """
     if query_type == "view_source":
-        result = _query_view_source(
+        result = await _query_view_source(
             notebook_path, execution_count, position_index, server_url, include_outputs
         )
-        # Update hash after viewing notebook content
-        NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
+        await NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
         return result
     elif query_type == "list_cells":
-        result = _query_list_cells(notebook_path, server_url, source_preview_length)
-        NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
+        result = await _query_list_cells(notebook_path, server_url, source_preview_length)
+        await NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
         return result
     elif query_type == "check_server":
-        # No notebook access, no hash update needed
-        return _query_check_server(server_url or "http://localhost:8888")
+        return await _query_check_server(server_url or "http://localhost:8888")
     elif query_type == "list_sessions":
-        # No notebook access, no hash update needed
-        return _query_list_sessions(server_url or "http://localhost:8888")
+        return await _query_list_sessions(server_url or "http://localhost:8888")
     elif query_type == "get_position_index":
-        result = _query_get_position_index(notebook_path, execution_count, cell_id)
-        # This accesses notebook content, so update hash
-        NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
+        result = await _query_get_position_index(notebook_path, execution_count, cell_id)
+        await NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
         return result
     else:
         raise ValueError(
-            f"Invalid query_type: {query_type}. Must be one of: view_source, list_cells, check_server, list_sessions, get_position_index"
+            f"Invalid query_type: {query_type}. Must be one of: view_source, list_cells, "
+            "check_server, list_sessions, get_position_index"
         )
 
 
+# ── Output filtering helpers (pure functions, no change needed) ──────────────
+
+
 def _filter_cell_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list[dict]]:
-    """Filter out verbose output data from cell data, keeping only source and basic metadata."""
+    """Filter out verbose output data from cell data."""
 
     def filter_single_cell(cell: dict) -> dict:
         if not isinstance(cell, dict):
             return cell
 
-        # Keep essential cell data but filter outputs
         filtered_cell = {
             "cell_type": cell.get("cell_type"),
             "source": cell.get("source"),
             "metadata": cell.get("metadata", {}),
         }
 
-        # For code cells, keep execution_count but filter outputs
         if cell.get("cell_type") == "code":
             filtered_cell["execution_count"] = cell.get("execution_count")
 
-            # Keep outputs but filter out large base64 data
             if "outputs" in cell:
                 filtered_outputs = []
                 for output in cell["outputs"]:
@@ -407,13 +345,11 @@ def _filter_cell_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list
                             "output_type": output.get("output_type"),
                         }
 
-                        # Keep text outputs but filter images and large data
                         if "text" in output:
                             filtered_output["text"] = output["text"]
                         if "name" in output:
                             filtered_output["name"] = output["name"]
 
-                        # For data outputs, indicate presence without including content
                         if "data" in output:
                             data_types = list(output["data"].keys())
                             if any(
@@ -428,7 +364,6 @@ def _filter_cell_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list
                                     "[filtered]": f"HTML data present ({', '.join(data_types)})"
                                 }
                             else:
-                                # Keep small text data
                                 filtered_output["data"] = output["data"]
 
                         filtered_outputs.append(filtered_output)
@@ -459,7 +394,10 @@ def _strip_outputs(cell_data: Union[dict, list[dict]]) -> Union[dict, list[dict]
     return strip_single(cell_data)
 
 
-def _query_list_cells(
+# ── Query helpers ─────────────────────────────────────────────────────────────
+
+
+async def _query_list_cells(
     notebook_path: str,
     server_url: str = None,
     source_preview_length: int = 60,
@@ -470,7 +408,7 @@ def _query_list_cells(
 
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    with notebook_client(notebook_path, server_url) as notebook:
+    async with notebook_client(notebook_path, server_url) as notebook:
         cells = []
         for i, cell in enumerate(notebook._doc.ycells):
             source = cell.get("source", "")
@@ -493,32 +431,17 @@ def _query_list_cells(
         return cells
 
 
-def _query_view_source(
+async def _query_view_source(
     notebook_path: str,
     execution_count: int = None,
     position_index: int = None,
     server_url: str = None,
     include_outputs: bool = True,
 ) -> Union[dict, list[dict]]:
-    """View the source code of a Jupyter notebook (either single cell or all cells).
-
-    We need to support passing in either the execution_count or the position_index because
-    depending on the context, goose may know one but not the other. Its knowledge also changes
-    over time, e.g. if it executes or adds cells these numbers can change.
-    Goose can pass in either *one* of the two arguments to view a single cell, or neither to view
-    all cells. It must NOT pass in both.
-
-    Args:
-        notebook_path: Path to the notebook file.
-        execution_count: The execution count to look for.
-        position_index: The position index to look for.
-        server_url: Server URL to connect to.
-        include_outputs: If True (default), include cell outputs. If False, strip all outputs.
-    """
+    """View the source code of a Jupyter notebook."""
     if execution_count is not None and position_index is not None:
         raise ValueError("Cannot provide both execution_count and position_index.")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
     if execution_count is None and position_index is None:
@@ -527,7 +450,7 @@ def _query_view_source(
     else:
         view_all = False
 
-    with notebook_client(notebook_path, server_url) as notebook:
+    async with notebook_client(notebook_path, server_url) as notebook:
         if view_all:
             raw_cells = notebook._doc.ycells.to_py()
             if not include_outputs:
@@ -535,7 +458,6 @@ def _query_view_source(
             return _filter_cell_outputs(raw_cells)
 
         if position_index is None:
-            # Find position index within the current notebook context
             position_indices = set()
             execution_count_int = execution_count if execution_count is not None else -1
 
@@ -544,8 +466,7 @@ def _query_view_source(
                     position_indices.add(i)
 
             if len(position_indices) != 1:
-                # Get comprehensive cell information for better error message
-                cells_info = _get_available_execution_counts(notebook_path)
+                cells_info = await _get_available_execution_counts(notebook_path)
 
                 if len(position_indices) == 0:
                     error_parts = []
@@ -555,7 +476,9 @@ def _query_view_source(
                     error_msg = f"No cells found with {' and '.join(error_parts)}."
 
                     if cells_info["execution_counts"]:
-                        error_msg += f" Available execution counts: {cells_info['execution_counts']}"
+                        error_msg += (
+                            f" Available execution counts: {cells_info['execution_counts']}"
+                        )
                     else:
                         error_msg += " No cells have been executed yet."
 
@@ -573,49 +496,34 @@ def _query_view_source(
         return _filter_cell_outputs(raw_cell)
 
 
-def _query_check_server(server_url: str) -> str:
-    """Check if the user-provided Jupyter server is running and accessible."""
+async def _query_check_server(server_url: str) -> str:
+    """Check if the Jupyter server is running."""
     try:
-        response = requests.get(
+        client = get_http_client()
+        response = await client.get(
             f"{server_url}/api/sessions",
             headers={"Authorization": f"token {TOKEN}"},
-            timeout=10,
         )
         response.raise_for_status()
         return "Jupyter server is running"
-    except requests.Timeout:
+    except httpx.TimeoutException:
         return "Jupyter server is not accessible (timeout)"
-    except requests.ConnectionError:
+    except httpx.ConnectError:
         return "Jupyter server is not accessible (connection error)"
     except Exception:
         return "Jupyter server is not accessible"
 
 
-def _query_list_sessions(server_url: str) -> list:
+async def _query_list_sessions(server_url: str) -> list:
     """List all notebook sessions on the Jupyter server."""
-    return list_notebook_sessions(server_url, TOKEN)
+    return await list_notebook_sessions(server_url, TOKEN)
 
 
-def _get_available_execution_counts(notebook_path: str) -> dict:
-    """Get comprehensive cell information for better error messages.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-
-    Returns
-    -------
-        dict: Contains:
-            - execution_counts: list of actual execution counts (excluding None)
-            - position_indices: list of all position indices
-            - cell_types: list of cell types for each position
-            - total_cells: total number of cells
-            - code_cells: number of code cells
-            - unexecuted_cells: number of code cells without execution count
-    """
+async def _get_available_execution_counts(notebook_path: str) -> dict:
+    """Get comprehensive cell information for error messages."""
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    with notebook_client(notebook_path) as notebook:
+    async with notebook_client(notebook_path) as notebook:
         cells_info = {
             "execution_counts": [],
             "position_indices": [],
@@ -639,51 +547,30 @@ def _get_available_execution_counts(notebook_path: str) -> dict:
                 else:
                     cells_info["unexecuted_cells"] += 1
 
-        # Sort execution counts for better presentation
         cells_info["execution_counts"].sort()
         return cells_info
 
 
-def _query_get_position_index(
+async def _query_get_position_index(
     notebook_path: str,
     execution_count: int = None,
     cell_id: str = None,
 ) -> int:
-    """Get the index of a code cell in a Jupyter notebook.
-
-    Dev notes re choice to pass in execution_count:
-    - another option is have user describe cell and/or have model infer it based on contents,
-    but that's also risky and could be annoying to type out
-    - another option is to modify the current/active cell, which I know we can get in
-    jupyter extensions but couldn't easily get that working here.
-    jupyter-ai-agents/jupyter_ai_agents repo seems to get the current_cell_index somehow but
-    haven't yet pinned down where/how.
-    - considered mapping to cell_id (str) instead of positional index as the unique identifier,
-    I think that would make goose less likely to confuse the two and lets us avoid the annoying
-    formatting issues with square brackets/parentheses. But NBModelClient uses positional index to
-    get/set cell values, so using ID here makes this clunkier.
-    # Note: cell_id based lookup not supported in RTC client
-    could be helpful here, either directly or as a reference implementation.
-    """
+    """Get the index of a code cell in a Jupyter notebook."""
     if execution_count is None and cell_id is None:
-        raise ValueError(
-            "Must provide either execution_count or cell_id (got neither)."
-        )
+        raise ValueError("Must provide either execution_count or cell_id (got neither).")
     if execution_count is not None and cell_id is not None:
         raise ValueError("Must provide either execution_count or cell_id (got both).")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    # Add parameter validation and user guidance
     if execution_count is not None:
-        # Validate execution_count range
         if execution_count < 1:
             raise ValueError(
                 f"execution_count={execution_count} is invalid. Execution counts start from 1. "
                 "If you meant to use position_index (which starts from 0), use position_index parameter instead."
             )
-        elif execution_count > 10000:  # Reasonable upper bound
+        elif execution_count > 10000:
             raise ValueError(
                 f"execution_count={execution_count} seems unreasonably high. "
                 "Are you sure this is correct? Most notebooks have execution counts in the 1-100 range. "
@@ -691,15 +578,12 @@ def _query_get_position_index(
             )
         execution_count_int = execution_count
 
-    # Set placeholder values for the search
-    # In each case we set one of the two params to a placeholder value that the actual notebook
-    # metadata never uses (don't use None because metadata does use that sometimes).
     if execution_count is not None:
         cell_id = "[placeholder-id]"
     else:
         execution_count_int = -1
 
-    with notebook_client(notebook_path) as notebook:
+    async with notebook_client(notebook_path) as notebook:
         position_indices = set()
         for i, cell in enumerate(notebook._doc.ycells):
             if (
@@ -709,11 +593,9 @@ def _query_get_position_index(
                 position_indices.add(i)
 
         if len(position_indices) != 1:
-            # Get comprehensive cell information for better error message
-            cells_info = _get_available_execution_counts(notebook_path)
+            cells_info = await _get_available_execution_counts(notebook_path)
 
             if len(position_indices) == 0:
-                # No matching cells found
                 error_parts = []
                 if execution_count is not None:
                     error_parts.append(
@@ -731,9 +613,9 @@ def _query_get_position_index(
                             "No cells have been executed yet (all execution_counts are None)"
                         )
 
-                    # Suggest alternatives
                     error_parts.append(
-                        f"Notebook has {cells_info['total_cells']} total cells (positions 0-{cells_info['total_cells'] - 1})"
+                        f"Notebook has {cells_info['total_cells']} total cells "
+                        f"(positions 0-{cells_info['total_cells'] - 1})"
                     )
                     if cells_info["code_cells"] > 0:
                         error_parts.append(
@@ -745,7 +627,8 @@ def _query_get_position_index(
                         )
 
                     error_parts.append(
-                        "Try using position_index instead, or execute the cell first to get an execution_count"
+                        "Try using position_index instead, or execute the cell first "
+                        "to get an execution_count"
                     )
 
                 if cell_id is not None and cell_id != "[placeholder-id]":
@@ -753,17 +636,22 @@ def _query_get_position_index(
 
                 error_message = ". ".join(error_parts)
             else:
-                # Multiple matching cells found (should be rare)
-                error_message = f"Found {len(position_indices)} cells matching the criteria at positions {sorted(position_indices)}."
+                error_message = (
+                    f"Found {len(position_indices)} cells matching the criteria "
+                    f"at positions {sorted(position_indices)}."
+                )
 
             raise ValueError(error_message)
 
         return position_indices.pop()
 
 
+# ── Tool: modify_notebook_cells ──────────────────────────────────────────────
+
+
 @mcp.tool()
 @NotebookState.state_dependent
-def modify_notebook_cells(
+async def modify_notebook_cells(
     notebook_path: str,
     operation: str,
     cell_content: str = None,
@@ -819,75 +707,60 @@ def modify_notebook_cells(
         IndexError: If position_index is out of range
     """
     if operation == "add_code":
-        return _modify_add_code_cell(
+        return await _modify_add_code_cell(
             notebook_path, cell_content, execute, position_index
         )
     elif operation == "edit_code":
-        return _modify_edit_code_cell(
+        return await _modify_edit_code_cell(
             notebook_path, position_index, cell_content, execute
         )
     elif operation == "add_markdown":
-        return _modify_add_markdown_cell(notebook_path, cell_content, position_index)
+        return await _modify_add_markdown_cell(notebook_path, cell_content, position_index)
     elif operation == "edit_markdown":
-        return _modify_edit_markdown_cell(notebook_path, position_index, cell_content)
+        return await _modify_edit_markdown_cell(notebook_path, position_index, cell_content)
     elif operation == "delete":
-        return _modify_delete_cell(notebook_path, position_index)
+        return await _modify_delete_cell(notebook_path, position_index)
     else:
         raise ValueError(
-            f"Invalid operation: {operation}. Must be one of: add_code, edit_code, add_markdown, edit_markdown, delete"
+            f"Invalid operation: {operation}. Must be one of: add_code, edit_code, "
+            "add_markdown, edit_markdown, delete"
         )
 
 
-def _modify_add_code_cell(
+# ── Modify helpers ────────────────────────────────────────────────────────────
+
+
+async def _modify_add_code_cell(
     notebook_path: str,
     cell_content: str,
     execute: bool = True,
     position_index: int = None,
 ) -> dict:
-    """Add (and optionally execute) a code cell in a Jupyter notebook.
-
-    If you are trying to fix a cell that previously threw an error,
-    you should default to editing the cell vs adding a new one.
-
-    Note that adding a cell without executing it leaves it with no execution_count which can make
-    it slightly trickier to execute in a subsequent request, but goose can now find cells by
-    cell_id and content as well, now that it can view the full notebook source.
-
-    A motivating example for why this is state-dependent: user asks goose to write a function,
-    user then manually modifies that function signature, then user asks goose to call that function
-    in a new cell. If goose's knowledge is outdated, it will likely use the old signature.
-    """
+    """Add (and optionally execute) a code cell in a Jupyter notebook."""
     if not cell_content:
         raise ValueError("cell_content is required for add_code operation")
 
     logger.info("Adding code cell")
 
     results = {}
-    with notebook_client(notebook_path) as notebook:
+    async with notebook_client(notebook_path) as notebook:
         if position_index is not None:
-            # Insert at specific position
-            notebook.insert_code_cell(position_index, cell_content)
-            # position_index is already set to the desired position
+            await notebook.insert_code_cell(position_index, cell_content)
         else:
-            # Add at the end (original behavior)
-            position_index = notebook.add_code_cell(cell_content)
+            position_index = await notebook.add_code_cell(cell_content)
 
-        # When the cell is added successfully but we don't need to execute it
         if not execute:
             return results
 
-        # When we need to execute
         try:
             logger.info("Cell added successfully, now executing")
-            # Use the internal execution function which applies proper filtering
-            results = _execute_cell_internal(notebook_path, position_index)
+            results = await _execute_cell_internal(notebook_path, position_index)
             return results
         except Exception as e:
             import traceback
 
             logger.error(f"Error during execution: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            # Return partial results if we have them
             results = {
                 "error": str(e),
                 "message": "Cell was added but execution failed",
@@ -896,25 +769,10 @@ def _modify_add_code_cell(
             return results
 
 
-def _modify_edit_code_cell(
+async def _modify_edit_code_cell(
     notebook_path: str, position_index: int, cell_content: str, execute: bool = True
 ) -> dict:
-    """Edit a code cell in a Jupyter notebook.
-
-    Note that users can edit cell contents too, so if you are making assumptions about the
-    position_index of the cell to edit based on chat history with the user, you should first
-    make sure the notebook state matches your expected state using your query_notebook tool.
-    If it does not match the expected state, you should then use your query_notebook tool to update
-    your knowledge of the current cell contents.
-
-    If you execute a cell and it fails and you want to debug it, you should default to editing
-    the existing cell vs adding a new cell each time you want to execute code.
-
-    A motivating example for why this is state-dependent: user asks goose to write a function,
-    user then manually modifies the function, then asks goose to make additional changes to the
-    function. If goose's knowledge is outdated, it will likely ignore the user's recent changes
-    and modify the old version of the function, losing user work.
-    """
+    """Edit a code cell in a Jupyter notebook."""
     if not cell_content:
         raise ValueError("cell_content is required for edit_code operation")
     if position_index is None:
@@ -922,7 +780,6 @@ def _modify_edit_code_cell(
 
     logger.info("Editing code cell")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
     full_cell_contents = {
@@ -935,45 +792,35 @@ def _modify_edit_code_cell(
 
     results = {}
 
-    with notebook_client(notebook_path) as notebook:
-        # Update cell source code.
-        notebook[position_index] = full_cell_contents
+    async with notebook_client(notebook_path) as notebook:
+        await notebook.set_cell(position_index, full_cell_contents)
         if execute:
-            results = _execute_cell_internal(notebook_path, position_index)
+            results = await _execute_cell_internal(notebook_path, position_index)
 
     return results
 
 
-def _modify_add_markdown_cell(
+async def _modify_add_markdown_cell(
     notebook_path: str, cell_content: str, position_index: Optional[int] = None
 ) -> dict:
-    """Add a markdown cell in a Jupyter notebook.
-
-    Technically might be a little risky to mark this as refreshes_state because the user could make
-    other changes that are invisible to goose. But trying it out this way because I don't think
-    goose adding a markdown cell should necessarily force it to view the full notebook source on
-    subsequent tool calls.
-    """
+    """Add a markdown cell in a Jupyter notebook."""
     if not cell_content:
         raise ValueError("cell_content is required for add_markdown operation")
 
     logger.info("Adding markdown cell")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
     results = {"message": "", "error": ""}
     try:
-        with notebook_client(notebook_path) as notebook:
+        async with notebook_client(notebook_path) as notebook:
             if position_index is not None:
-                # Insert at specific position
-                notebook.insert_markdown_cell(position_index, cell_content)
+                await notebook.insert_markdown_cell(position_index, cell_content)
                 results["message"] = (
                     f"Markdown cell inserted at position {position_index}"
                 )
             else:
-                # Add at the end (original behavior)
-                notebook.add_markdown_cell(cell_content)
+                await notebook.add_markdown_cell(cell_content)
                 results["message"] = "Markdown cell added"
 
     except Exception as e:
@@ -983,35 +830,10 @@ def _modify_add_markdown_cell(
     return results
 
 
-def _modify_edit_markdown_cell(
+async def _modify_edit_markdown_cell(
     notebook_path: str, position_index: int, cell_content: str
 ) -> dict:
-    """Edit an existing markdown cell in a Jupyter notebook.
-
-    Note that users can edit cell contents too, so if you are making assumptions about the
-    position_index of the cell to edit based on chat history with the user, you should first
-    make sure the notebook state matches your expected state using your query_notebook tool.
-    If it does not match the expected state, you should then use your query_notebook tool to update
-    your knowledge of the current cell contents.
-
-    Args:
-        notebook_path: Path to the notebook file (.ipynb extension will be added if missing),
-                       relative to the Jupyter server root.
-        position_index: positional index that NBModelClient uses under the hood.
-        cell_content: New markdown content to write to the cell.
-
-    Returns
-    -------
-        dict: Contains two keys:
-            - "message": "Markdown cell edited" if successful, empty string if failed
-            - "error": Error message if failed, empty string if successful
-
-    Raises
-    ------
-        McpError: If notebook state has changed since last viewed
-        McpError: If there's an error connecting to the Jupyter server
-        IndexError: If position_index is out of range
-    """
+    """Edit an existing markdown cell in a Jupyter notebook."""
     if not cell_content:
         raise ValueError("cell_content is required for edit_markdown operation")
     if position_index is None:
@@ -1019,7 +841,6 @@ def _modify_edit_markdown_cell(
 
     logger.info("Editing markdown cell")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
     full_cell_contents = {
@@ -1031,9 +852,8 @@ def _modify_edit_markdown_cell(
     results = {"message": "", "error": ""}
 
     try:
-        with notebook_client(notebook_path) as notebook:
-            # Update cell source code.
-            notebook[position_index] = full_cell_contents
+        async with notebook_client(notebook_path) as notebook:
+            await notebook.set_cell(position_index, full_cell_contents)
         results["message"] = "Markdown cell edited"
     except Exception as e:
         logger.error(f"Error editing markdown cell: {e}")
@@ -1042,39 +862,29 @@ def _modify_edit_markdown_cell(
     return results
 
 
-def _modify_delete_cell(notebook_path: str, position_index: int) -> dict:
-    """Delete a code cell in a Jupyter notebook.
-
-    Note that users can edit cell contents too, so if you assume you know the position_index
-    of the cell to delete based on past chat history, you should first make sure the notebook state
-    matches your expected state using your query_notebook tool. If it does not match the
-    expected state, you should then use your query_notebook tool to update your knowledge of the
-    current cell contents.
-
-    A motivating example for why this is state-dependent: user asks goose to add a new cell,
-    then user runs a few cells manually (changing execution_counts), then tells goose
-    "now delete it". In the context of the conversation, this looks fine and Goose may assume it
-    knows the correct position_index already, but its knowledge is outdated.
-    """
+async def _modify_delete_cell(notebook_path: str, position_index: int) -> dict:
+    """Delete a cell in a Jupyter notebook."""
     if position_index is None:
         raise ValueError("position_index is required for delete operation")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
     results = {"message": "", "error": ""}
-    with notebook_client(notebook_path) as notebook:
+    async with notebook_client(notebook_path) as notebook:
         try:
-            notebook.delete_cell(position_index)
+            await notebook.delete_cell(position_index)
             results["message"] = "Cell deleted"
         except Exception as e:
             results["error"] = str(e)
     return results
 
 
+# ── Tool: execute_notebook_code ──────────────────────────────────────────────
+
+
 @mcp.tool()
 @NotebookState.state_dependent
-def execute_notebook_code(
+async def execute_notebook_code(
     notebook_path: str,
     execution_type: str,
     position_index: int = None,
@@ -1119,88 +929,59 @@ def execute_notebook_code(
         RuntimeError: If kernel execution fails
     """
     if execution_type == "execute_cell":
-        return _execute_cell_internal(notebook_path, position_index)
+        return await _execute_cell_internal(notebook_path, position_index)
     elif execution_type == "install_packages":
-        return _execute_install_packages(notebook_path, package_names)
+        return await _execute_install_packages(notebook_path, package_names)
     else:
         raise ValueError(
             f"Invalid execution_type: {execution_type}. Must be one of: execute_cell, install_packages"
         )
 
 
-def _execute_cell_internal(notebook_path: str, position_index: int) -> dict:
-    """Execute an existing code cell in a Jupyter notebook.
+# ── Execute helpers ───────────────────────────────────────────────────────────
 
-    In most cases you should call modify_notebook_cells instead, but occasionally
-    you might want to re-execute a cell after changing a *different* cell.
 
-    Note that users can edit cell contents too, so if you assume you know the position_index
-    of the cell to execute based on past chat history, you should first make sure the notebook state
-    matches your expected state using your query_notebook tool. If it does not match the
-    expected state, you should then use your query_notebook tool to update your knowledge of the
-    current cell contents.
-
-    Technically could be considered state_dependent, but it is usually called inside edit_code_cell
-    or add_code_cell which area already state_dependent. Every hash update is slow because we have
-    to wait for the notebook to save first so using refreshes_state instead saves 1.5s per call.
-    Only risk is if user asks goose to execute a single cell and goose assumes it knows the
-    position_index already, but usually it would be faster for the user to just execute the cell
-    directly - this tool is mostly useful to allow goose to debug independently.
-    """
+async def _execute_cell_internal(notebook_path: str, position_index: int) -> dict:
+    """Execute an existing code cell in a Jupyter notebook."""
     if position_index is None:
         raise ValueError("position_index is required for execute_cell operation")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
+    kernel = await get_kernel(notebook_path)
 
-    # Get kernel using the stored server URL
-    kernel = get_kernel(notebook_path)
+    async with notebook_client(notebook_path) as notebook:
+        result = await notebook.execute_cell(position_index, kernel)
 
-    with notebook_client(notebook_path) as notebook:
-        result = notebook.execute_cell(position_index, kernel)
-
-        # Filter out base64 images from outputs to save tokens
         if "outputs" in result:
             result["outputs"] = filter_image_outputs(result["outputs"])
 
         return result
 
 
-def _execute_install_packages(notebook_path: str, package_names: str) -> str:
-    """Install one or more packages using uv pip in the notebook environment.
-
-    Unlike add_code_cell, this shouldn't rely on other code written in the notebook, so we mark
-    it as refreshes_state rather than state_dependent. Assumes 'uv' is available in the
-    environment where the Jupyter kernel is running.
-    """
+async def _execute_install_packages(notebook_path: str, package_names: str) -> str:
+    """Install packages using uv pip in the notebook environment."""
     if not package_names:
         raise ValueError("package_names is required for install_packages operation")
 
     logger.info(f"Installing packages: {package_names}")
 
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    # Get kernel on demand - rely on NotebookState for server_url
     try:
-        current_kernel = get_kernel(notebook_path)
+        current_kernel = await get_kernel(notebook_path)
     except McpError:
-        # Just re-raise the error from get_kernel
         raise
 
     try:
-        with notebook_client(notebook_path) as notebook:
-            # Create a cell that installs the packages using uv pip
+        async with notebook_client(notebook_path) as notebook:
             cell_content = f"!uv pip install {package_names}"
-            cell_index = notebook.add_code_cell(cell_content)
-            result = notebook.execute_cell(cell_index, current_kernel)
+            cell_index = await notebook.add_code_cell(cell_content)
+            result = await notebook.execute_cell(cell_index, current_kernel)
 
-            # Filter out base64 images from outputs to save tokens
             outputs = result.get("outputs", [])
             if len(outputs) > 0:
                 outputs = filter_image_outputs(outputs)
 
-            # Extract output to see if installation was successful
             if len(outputs) == 0:
                 installation_result = "No output from installation command"
             else:
@@ -1213,9 +994,12 @@ def _execute_install_packages(notebook_path: str, package_names: str) -> str:
         return f"Error: {str(e)}"
 
 
+# ── Tool: setup_notebook ─────────────────────────────────────────────────────
+
+
 @mcp.tool()
 @NotebookState.refreshes_state
-def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
+async def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
     r"""Prepare notebook for use and connect to the kernel on the user-provided server.
     Will create a new empty Jupyter notebook if needed on the server.
 
@@ -1251,50 +1035,35 @@ def setup_notebook(notebook_path: str, server_url: str = None) -> dict:
     -------
         dict: Information about the notebook and status message.
     """
-    global kernel
-
-    # Ensure the notebook path has the .ipynb extension
     notebook_path = _ensure_ipynb_extension(notebook_path)
 
-    # Only set the server URL if a non-None value is provided
     if server_url is not None:
         NotebookState.set_server_url(notebook_path, server_url)
-    # Make sure we have a valid server_url for the rest of this function
     server_url = NotebookState.get_server_url(notebook_path)
 
-    # Use the notebook module but with the local TOKEN
-    from .notebook import prepare_notebook
+    info = await prepare_notebook(notebook_path, server_url, TOKEN)
 
-    info = prepare_notebook(notebook_path, server_url, TOKEN)
-
-    # Filter the notebook content to remove base64 images
     if "content" in info and info["content"]:
         if "cells" in info["content"]:
             info["content"]["cells"] = _filter_cell_outputs(info["content"]["cells"])
 
-    # Refresh the state hash
-    time.sleep(0.5)  # Short delay to ensure notebook is fully saved
-    NotebookState.update_hash(notebook_path, server_url, caller="notebook_final")
+    await anyio.sleep(0.5)
+    await NotebookState.update_hash(notebook_path, server_url, caller="notebook_final")
 
     return info
+
+
+# ── Server creation ───────────────────────────────────────────────────────────
 
 
 def create_server(
     host: str = "127.0.0.1", port: int = 8000, stateless_http: bool = False
 ) -> FastMCP:
-    """Create and configure the FastMCP server instance.
-
-    Args:
-        host: Server host address
-        port: Server port number
-        stateless_http: If True, enables stateless HTTP mode (no session persistence)
-    """
+    """Create and configure the FastMCP server instance."""
     global mcp
-    # If custom settings are provided, recreate the server with those settings
     if host != "127.0.0.1" or port != 8000 or stateless_http:
         mcp = FastMCP("notebook", host=host, port=port, stateless_http=stateless_http)
 
-        # Re-register all the tools
         mcp.tool()(query_notebook)
         mcp.tool()(modify_notebook_cells)
         mcp.tool()(execute_notebook_code)
@@ -1304,15 +1073,11 @@ def create_server(
 
 
 if __name__ == "__main__":
-    # Check for transport argument
-    transport = "stdio"  # default
+    transport = "stdio"
     if len(sys.argv) > 1:
         if sys.argv[1] in ["--http", "-h"]:
             transport = "streamable-http"
 
-    # Create server with default settings
     server = create_server()
-
-    # Initialize and run the server
     logger.info(f"Starting MCP notebook server with {transport} transport")
     server.run(transport=transport)
