@@ -263,6 +263,7 @@ def query_notebook(
     execution_count: int = None,
     position_index: int = None,
     cell_id: str = None,
+    variable_name: str = None,
     server_url: str = None,
 ) -> Union[dict, list, str, int]:
     """Query notebook information and metadata on the user-provided server.
@@ -290,6 +291,8 @@ def query_notebook(
             - 'check_server': Check if Jupyter server is running and accessible
             - 'list_sessions': List all notebook sessions on the server
             - 'get_position_index': Get the index of a code cell
+            - 'list_variables': List all variables currently in the kernel namespace
+            - 'inspect_variable': Inspect the value of a specific kernel variable
         execution_count: (For view_source/get_position_index) The execution count to look for.
             IMPORTANT: This is the number shown in square brackets like [3] in Jupyter UI.
             Only available for executed code cells. Must be an integer (e.g., 3).
@@ -302,6 +305,7 @@ def query_notebook(
             Works for all cell types (code, markdown, raw). Must be an integer.
         cell_id: (For get_position_index) Cell ID like "205658d6-093c-4722-854c-90b149f254ad".
             This is a unique identifier for each cell, visible in notebook metadata.
+        variable_name: (For inspect_variable) Name of the variable to inspect in the kernel namespace.
         server_url: Server URL to connect to. If not provided, uses the URL stored by setup_notebook,
                    or falls back to http://localhost:8888
 
@@ -312,6 +316,8 @@ def query_notebook(
             - check_server: str status message
             - list_sessions: list of notebook sessions
             - get_position_index: int positional index
+            - list_variables: list of variable info dicts with name, type, and value preview
+            - inspect_variable: dict with full variable info including repr and type
 
     Examples
     --------
@@ -329,6 +335,12 @@ def query_notebook(
 
         # Get position index by cell ID
         query_notebook("my_notebook.ipynb", "get_position_index", cell_id="205658d6-093c-4722-854c-90b149f254ad")
+
+        # List all variables in the kernel namespace
+        query_notebook("my_notebook.ipynb", "list_variables")
+
+        # Inspect a specific variable
+        query_notebook("my_notebook.ipynb", "inspect_variable", variable_name="df")
 
     Raises
     ------
@@ -353,9 +365,15 @@ def query_notebook(
         # This accesses notebook content, so update hash
         NotebookState.update_hash(notebook_path, server_url, caller="query_notebook")
         return result
+    elif query_type == "list_variables":
+        return _query_list_variables(notebook_path, server_url)
+    elif query_type == "inspect_variable":
+        if not variable_name:
+            raise ValueError("variable_name is required for inspect_variable query_type")
+        return _query_inspect_variable(notebook_path, variable_name, server_url)
     else:
         raise ValueError(
-            f"Invalid query_type: {query_type}. Must be one of: view_source, check_server, list_sessions, get_position_index"
+            f"Invalid query_type: {query_type}. Must be one of: view_source, check_server, list_sessions, get_position_index, list_variables, inspect_variable"
         )
 
 
@@ -505,6 +523,36 @@ def _query_check_server(server_url: str) -> str:
 def _query_list_sessions(server_url: str) -> list:
     """List all notebook sessions on the Jupyter server."""
     return list_notebook_sessions(server_url, TOKEN)
+
+
+def _query_list_variables(notebook_path: str, server_url: str = None) -> list:
+    """List all variables currently in the kernel namespace."""
+    kernel = get_kernel(notebook_path, server_url)
+    if kernel is None:
+        raise McpError(
+            ErrorData(
+                code=INTERNAL_ERROR,
+                message="No active kernel found for this notebook. Run a cell first to start the kernel.",
+            )
+        )
+    variables = kernel.list_variables()
+    return variables
+
+
+def _query_inspect_variable(
+    notebook_path: str, variable_name: str, server_url: str = None
+) -> dict:
+    """Inspect the value of a specific variable in the kernel namespace."""
+    kernel = get_kernel(notebook_path, server_url)
+    if kernel is None:
+        raise McpError(
+            ErrorData(
+                code=INTERNAL_ERROR,
+                message="No active kernel found for this notebook. Run a cell first to start the kernel.",
+            )
+        )
+    value = kernel.get_variable(variable_name)
+    return {"name": variable_name, "value": value}
 
 
 def _get_available_execution_counts(notebook_path: str) -> dict:
