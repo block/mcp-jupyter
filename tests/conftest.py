@@ -5,6 +5,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -122,12 +123,13 @@ def _start_jupyter_server(port: int, test_dir_name: str, server_type: str = ""):
 
     # Start the Jupyter server process
     print(f"Starting {server_type}Jupyter server on port {port}...")
+    is_windows = sys.platform == "win32"
     server_process = subprocess.Popen(
         jupyter_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        preexec_fn=os.setsid,
+        **({} if is_windows else {"preexec_fn": os.setsid}),
     )
 
     # Wait for the server to start with optimized polling
@@ -189,13 +191,19 @@ def _cleanup_jupyter_server(
     # Cleanup: kill the Jupyter server process and all its children
     print(f"Shutting down {server_type}Jupyter server")
     try:
-        os.killpg(os.getpgid(server_process.pid), signal.SIGTERM)
+        if sys.platform == "win32":
+            server_process.terminate()
+        else:
+            os.killpg(os.getpgid(server_process.pid), signal.SIGTERM)
         server_process.wait(timeout=5)
     except ProcessLookupError:
         print(f"{server_type}Server process already terminated.")
     except subprocess.TimeoutExpired:
         print(f"{server_type}Server process did not terminate gracefully, killing.")
-        os.killpg(os.getpgid(server_process.pid), signal.SIGKILL)
+        if sys.platform == "win32":
+            server_process.kill()
+        else:
+            os.killpg(os.getpgid(server_process.pid), signal.SIGKILL)
         server_process.wait()
 
     # Remove the entire test directory and its contents
